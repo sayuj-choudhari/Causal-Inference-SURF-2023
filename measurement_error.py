@@ -298,9 +298,9 @@ def get_regression_corrected_dist(dist, err_dist, proxy_var, proxy_arr, truth_ar
   for non_proxy_assn in itertools.product(*[range(2) for _ in range(full_dim - 1)]):
     non_proxy_assn = dict(zip(non_proxy_columns, non_proxy_assn))
 
-    assn0 = {**non_proxy_assn, **{proxy_var: 0}}
+    assn0 = {**non_proxy_assn, **{proxy_var: 1}}
     tuple_assn0 = tuple(assn0[col] for col in dist.columns)
-    assn1 = {**non_proxy_assn, **{proxy_var: 1}}
+    assn1 = {**non_proxy_assn, **{proxy_var: 0}}
     tuple_assn1 = tuple(assn1[col] for col in dist.columns)
     err1 = model.predict_proba(**assn1)
     err0 = model.predict_proba(**assn0)
