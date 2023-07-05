@@ -243,6 +243,102 @@ def get_corrected_dist(dist, err_dist, proxy_var, truth=None, debug=False):
                            normalized=True)
   return corrected
 
+def train_error_model(proxy_arr, truth_arr, proxy_var, columns, influence_vars=None):
+  '''
+    Given the proxy (A*) and truth (A), and all other features that influence A* (assumed
+    to be all other variables if influence_vars is None) fits a logistic regression to
+    predict an error in A* given by p(A* != A | A, C, Y).
+  '''
+
+  assert type(proxy_arr) == np.ndarray
+  assert type(truth_arr) == np.ndarray
+
+  full_dim = len(columns)
+  proxy_i = columns.index(proxy_var)
+
+  assert proxy_arr.shape[1] == full_dim
+  proxy_col = proxy_arr[:, proxy_i]
+  if truth_arr.shape[1] == full_dim:
+    truth_arr = truth_arr[:, proxy_i]
+  else:
+    assert truth_arr.shape[1] == 1
+
+  label_list = [0 if proxy_col[i] == truth_arr[i] else 1 for i in range(len(proxy_col))]
+  if influence_vars == None:
+    indices = [i for i in range(full_dim) if columns[i] != proxy_var]
+  else:
+    indices = [i for i in range(full_dim) if columns[i] in influence_vars]
+  influences = np.column_stack((proxy_arr[:, indices], truth_arr))
+
+  model = LogisticRegression()
+  model.fit(influences, label_list)
+  return model
+
+def get_regression_corrected_dist(dist, err_dist, proxy_var, proxy_arr, truth_arr,
+                                   columns, influence_vars=None, truth=None, debug=False):
+  '''
+  Given a proxy distribution dist, error estimates, and a held-out truth,
+    calculate the new dist that comes from using the error estimates to correct the proxy.
+  dist: p(C, A*, Y)
+  errs: p(A*, A)
+  truth: p(C, A, Y)
+  '''
+
+  assert type(dist) == Distribution
+
+  if influence_vars != None:
+    model = train_error_model(proxy_arr, truth_arr, proxy_var, columns, influence_vars)
+  else:
+    model = train_error_model(proxy_arr, truth_arr, proxy_var, columns)
+  
+
+  non_proxy_columns = [col for col in dist.columns if col != proxy_var]
+  full_dim = len(dist.columns)
+  corrected = {}
+  for non_proxy_assn in itertools.product(*[range(2) for _ in range(full_dim - 1)]):
+    non_proxy_assn = dict(zip(non_proxy_columns, non_proxy_assn))
+
+    assn0 = {**non_proxy_assn, **{proxy_var: 0}}
+    tuple_assn0 = tuple(assn0[col] for col in dist.columns)
+    assn1 = {**non_proxy_assn, **{proxy_var: 1}}
+    tuple_assn1 = tuple(assn1[col] for col in dist.columns)
+    err1 = model.predict_proba(**assn1)
+    err0 = model.predict_proba(**assn0)
+    # err0 = errs[get_assn(0, confound_assn, proxied_index)]
+
+    if err1 + err0 != 1.0:
+      corrected1 = (1 - err1) * dist.get(**assn0) - err1 * dist.get(**assn1)
+      corrected1 /= (1 - err1 - err0)
+      corrected1 = max(corrected1, 1e-5)
+      corrected[tuple_assn1] = corrected1
+    else:
+      corrected[tuple_assn1] = dist.get(**assn1)
+
+    if err1 + err0 != 1.0:
+      corrected0 = - err0 * dist.get(**assn0) + (1 - err0) * dist.get(**assn1)
+      corrected0 /= (1 - err1 - err0)
+      corrected0 = max(corrected0, 1e-5)
+      corrected[tuple_assn0] = corrected0
+    else:
+      corrected[tuple_assn0] = dist.get(**assn1)
+
+  # We may need to normalize if we had singularities and had to keep original dist 
+  total_weight = np.sum(list(corrected.values()))
+  if not np.isclose(total_weight, 1, atol=1e-1):
+    total_weight = math.fsum(list(corrected.values()))
+    for i in range(3):
+      keys, vals = zip(*list(corrected.items()))
+      new_vals = np.array(vals) / total_weight
+      corrected = dict(zip(keys, new_vals))
+      new_total_weight = math.fsum(list(corrected.values()))
+      if np.isclose(new_total_weight, 1, atol=1e-1):
+        break
+
+  corrected = Distribution(data=corrected, columns=dist.columns,
+                           normalized=True)
+  return corrected
+
+
 
 def check_restoration(dist1, dist2):
   '''
