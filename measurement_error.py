@@ -10,6 +10,7 @@ from collections import OrderedDict, defaultdict
 
 import numpy as np
 import sklearn.linear_model
+from sklearn.linear_model import LogisticRegression
 
 from datasets import SyntheticData
 from utils import Distribution, gformula, NumpySerializer
@@ -136,7 +137,7 @@ def count_where_assn(arr, columns, mapping):
 
 def calculate_error_matrix(proxy_arr, truth_arr, proxy_var, columns, sample=False,
                            alpha=None, nondiff=False, debug=False,
-                           n_func=None, return_triple=False):
+                           n_func=None, return_triple=False, influence_vars = None):
   '''
     Given the proxy (A*) and truth (A), calculate the correction matrix
     to adjust the causal effect calculations
@@ -161,7 +162,7 @@ def calculate_error_matrix(proxy_arr, truth_arr, proxy_var, columns, sample=Fals
     get_error_rate_func = get_error_rate
 
   errs = {}
-  if nondiff:
+  if influence_vars is None:
     nondiff_errs = {}
     for truth_val in [0, 1]:
       nondiff_errs[truth_val] = get_error_rate_func(
@@ -172,7 +173,7 @@ def calculate_error_matrix(proxy_arr, truth_arr, proxy_var, columns, sample=Fals
       truth_val = assn[proxy_i]
       errs[assn] = nondiff_errs[truth_val]
   else:
-    indices = [i for i in range(full_dim) if columns[i] != proxy_var]
+    indices = [i for i in range(full_dim) if columns[i] != proxy_var and columns[i] in influence_vars]
     confounds = proxy_arr[:, indices]
     for assn in itertools.product(*[range(2) for _ in range(full_dim)]):
       truth_val = assn[proxy_i]
@@ -263,19 +264,24 @@ def train_error_model(proxy_arr, truth_arr, proxy_var, columns, influence_vars=N
   else:
     assert truth_arr.shape[1] == 1
 
-  label_list = [0 if proxy_col[i] == truth_arr[i] else 1 for i in range(len(proxy_col))]
-  if influence_vars == None:
-    indices = [i for i in range(full_dim) if columns[i] != proxy_var]
+  bin_proxy_col = (proxy_col > 0.5).astype(int)
+  label_list = [0 if bin_proxy_col[i] == truth_arr[i] else 1 for i in range(len(proxy_col))]
+  # import pdb; pdb.set_trace()
+
+  # if influence_vars == None:
+  #   indices = [i for i in range(full_dim) if columns[i] != proxy_var]
+  # else:
+  if influence_vars is not None:
+    indices = [i for i in range(full_dim) if (columns[i] in influence_vars and columns[i] != proxy_var)]
+    influences = np.column_stack((proxy_arr[:, indices], truth_arr))
   else:
-    indices = [i for i in range(full_dim) if columns[i] in influence_vars]
-  influences = np.column_stack((proxy_arr[:, indices], truth_arr))
+    influences = truth_arr.reshape(-1, 1)
 
   model = LogisticRegression()
   model.fit(influences, label_list)
   return model
 
-def get_regression_corrected_dist(dist, err_dist, proxy_var, proxy_arr, truth_arr,
-                                   columns, influence_vars=None, truth=None, debug=False):
+def get_regression_corrected_dist(dist, proxy_var, model, influence_vars = None):
   '''
   Given a proxy distribution dist, error estimates, and a held-out truth,
     calculate the new dist that comes from using the error estimates to correct the proxy.
@@ -286,24 +292,45 @@ def get_regression_corrected_dist(dist, err_dist, proxy_var, proxy_arr, truth_ar
 
   assert type(dist) == Distribution
 
-  if influence_vars != None:
-    model = train_error_model(proxy_arr, truth_arr, proxy_var, columns, influence_vars)
-  else:
-    model = train_error_model(proxy_arr, truth_arr, proxy_var, columns)
+  # if influence_vars != None:
+  #   model = train_error_model(proxy_arr, truth_arr, proxy_var, columns, influence_vars)
+  # else:
+  #   model = train_error_model(proxy_arr, truth_arr, proxy_var, columns)
   
 
   non_proxy_columns = [col for col in dist.columns if col != proxy_var]
+
   full_dim = len(dist.columns)
   corrected = {}
+  if influence_vars is not None:
+    influencers = influence_vars[:]
+    print(influence_vars)
+    influencers.append(proxy_var)
+    print(influence_vars)
+
+  print(influencers)
   for non_proxy_assn in itertools.product(*[range(2) for _ in range(full_dim - 1)]):
     non_proxy_assn = dict(zip(non_proxy_columns, non_proxy_assn))
 
     assn0 = {**non_proxy_assn, **{proxy_var: 1}}
     tuple_assn0 = tuple(assn0[col] for col in dist.columns)
     assn1 = {**non_proxy_assn, **{proxy_var: 0}}
+    # x = np.array(assn1[proxy_var])
+    # import pdb; pdb.set_trace()
     tuple_assn1 = tuple(assn1[col] for col in dist.columns)
-    err1 = model.predict_proba(**assn1)
-    err0 = model.predict_proba(**assn0)
+    if influence_vars is not None:
+      model_input1 = tuple(assn1[col] for col in influencers)
+      model_input0 = tuple(assn0[col] for col in influencers)
+      input = np.array(model_input1).reshape(1, -1)
+      shape = input.shape
+      # import pdb; pdb.set_trace()
+      # print(influence_vars)
+      # print(assn1)
+      err1 = model.predict_proba(np.array(model_input1).reshape(1, -1))[:, 1]
+      err0 = model.predict_proba(np.array(model_input0).reshape(1, -1))[:, 1]
+    else: 
+      err1 = model.predict_proba(np.array(assn1[proxy_var]).reshape(-1, 1))[:, 1]
+      err0 = model.predict_proba(np.array(assn0[proxy_var]).reshape(-1, 1))[:, 1]
     # err0 = errs[get_assn(0, confound_assn, proxied_index)]
 
     if err1 + err0 != 1.0:
@@ -337,6 +364,60 @@ def get_regression_corrected_dist(dist, err_dist, proxy_var, proxy_arr, truth_ar
   corrected = Distribution(data=corrected, columns=dist.columns,
                            normalized=True)
   return corrected
+
+def correct_with_model(dist, proxy_var, proxy_arr, truth_arr, influence_vars = None):
+  
+  model = train_error_model(proxy_arr, truth_arr, proxy_var, dist.columns, influence_vars)
+  return get_regression_corrected_dist(dist, proxy_var, model, influence_vars = influence_vars)
+
+def impute_and_correct_with_model(train, test, columns, proxy_var,
+                                  train_percent=0.5, c_dim=1, u_dim=1,
+                                  sample_err_rates=0, bootstrap=1,
+                                  nondiff=False, alpha=None, debug=False, influence_vars = None):
+  '''
+  train: training data
+  test: testing data
+  num_train: how many examples of training data to use for training,
+    (leaving the rest for development)
+  proxy_i: what is the index of the proxied variable (e.g. 1)
+  confound_i: what are the indices of the proxy's confounders (e.g. 0, 2)
+  '''
+
+  # features are everything but the proxy variable
+  full_dim = len(columns)
+  proxy_i = columns.index(proxy_var)
+
+  feature_rows = tuple(i for i in range(train.shape[1]) if i != proxy_i)
+  # train_features = np.concatenate((train[:, :proxy_i], train[:, 1 + proxy_i:]),
+                                  # axis=1)
+
+  num_train = int(train_percent * train.shape[0])
+  num_dev = train.shape[0] - num_train
+
+  model = sklearn.linear_model.LogisticRegression(solver='lbfgs')
+  # model.fit(train_features[:num_train, :], train[:num_train, proxy_i])
+  model.fit(train[:num_train, feature_rows], train[:num_train, proxy_i])
+
+  # true_dev = train_features[num_train:, :]
+  # dev_preds = model.predict_proba(true_dev)
+  dev_preds = model.predict_proba(train[num_train:, feature_rows])
+  dev_truth = train[num_train:, :full_dim]
+  true_dev_proxy = train[num_train:, :full_dim].copy().astype(np.float64)
+  true_dev_proxy[:, proxy_i] = dev_preds[:, 0]
+  true_dev_proxy_dist = get_fractional_dist(true_dev_proxy, columns, proxy_var)
+
+  # test_features = np.concatenate((test[:, :proxy_i], test[:, 1 + proxy_i:]),
+  #                                axis=1)
+  # test_preds = model.predict_proba(test_features)
+  test_preds = model.predict_proba(test[:, feature_rows])
+  test_proxy = test[:, :full_dim].copy().astype(np.float64)
+  test_proxy[:, proxy_i] = test_preds[:, 0]
+  true_test_proxy_dist = get_fractional_dist(test_proxy, columns, proxy_var)
+
+  correct_distribution = correct_with_model(true_test_proxy_dist, proxy_var, true_dev_proxy[:, :full_dim], dev_truth, influence_vars = influence_vars)
+  return [correct_distribution], true_dev_proxy_dist
+
+
 
 
 
@@ -397,7 +478,7 @@ def correct(proxy_dist, proxy_var, err_ranges,
 def fractional_impute_and_correct(train, test, columns, proxy_var,
                                   train_percent=0.5, c_dim=1, u_dim=1,
                                   sample_err_rates=0, bootstrap=1,
-                                  nondiff=False, alpha=None, debug=False):
+                                  nondiff=False, alpha=None, debug=False, influence_vars = None):
   '''
   train: training data
   test: testing data
@@ -450,13 +531,13 @@ def fractional_impute_and_correct(train, test, columns, proxy_var,
     err_ranges = calculate_error_matrix(
         dev_proxy, dev, proxy_var, columns,
         sample=sample_err_rates > 0,
-        alpha=alpha, nondiff=nondiff, debug=debug)
+        alpha=alpha, nondiff=nondiff, debug=debug, influence_vars = influence_vars)
 
     if debug:
       test_err = calculate_error_matrix(
           test_proxy, test[:, :full_dim], proxy_var, columns,
           sample=sample_err_rates > 0,
-          alpha=alpha, nondiff=nondiff, debug=debug)
+          alpha=alpha, nondiff=nondiff, debug=debug, influence_vars = influence_vars)
       print("train_err:", {key: [round(x, 3) for x in val]
                            for key, val in err_ranges.dict.items()})
       print("test_err:", {key: round(val[0], 3)
@@ -473,7 +554,7 @@ def fractional_impute_and_correct(train, test, columns, proxy_var,
 
 def train_adjust(train, test, proxy_var, c_dim=1, u_dim=1,
                  bootstrap=1, sample_err_rates=0, alpha=None,
-                 train_percent=0.5, nondiff=False, debug=False):
+                 train_percent=0.5, nondiff=False, debug=False, influence_vars = None):
   '''
   Given train and test data, train a logistic regression classifier to
     impute a proxy for the missing variables, then calculate the errors
@@ -486,11 +567,11 @@ def train_adjust(train, test, proxy_var, c_dim=1, u_dim=1,
   test_dist = get_dist(truth, columns)
   oracle_effect = gformula(test_dist)
 
-  new_dists, proxy = fractional_impute_and_correct(
+  new_dists, proxy = impute_and_correct_with_model(
       train, test, columns, proxy_var,
       c_dim=c_dim, u_dim=u_dim, train_percent=train_percent,
       sample_err_rates=sample_err_rates, bootstrap=bootstrap, nondiff=nondiff,
-      alpha=alpha, debug=debug)
+      alpha=alpha, debug=debug, influence_vars = influence_vars)
   # print("have {} new dists".format(len(new_dists)))
 
   return test_dist, new_dists, proxy
@@ -552,6 +633,7 @@ def synthetic(n_examples, n_train, seed=None, **kwargs):
   sample_err_rates = kwargs.get('sample_err_rates', 0)
   bootstrap = kwargs.get('bootstrap', 1)
   train_percent = kwargs.get('train_percent', 0.5)
+  influence_vars = kwargs.get('influence_vars')
 
   train = np.concatenate([external, external_t], axis=1)
   test = np.concatenate([truth, truth_t], axis=1)
@@ -564,8 +646,9 @@ def synthetic(n_examples, n_train, seed=None, **kwargs):
       bootstrap=bootstrap,
       train_percent=train_percent,
       nondiff=nondiff,
-      alpha=alpha, debug=debug)
+      alpha=alpha, debug=debug, influence_vars = influence_vars)
 
+  # import pdb; pdb.set_trace()
   if kwargs.get('uncorrected', False):
     return true_dist, [unc_proxy]
 
@@ -682,15 +765,21 @@ def main():
                       help="dimensionality of c")
   parser.add_argument("--u_dim", type=int, default=1,
                       help="dimensionality of u")
-  parser.add_argument("--dist_seed", type=int, default=1)
-  parser.add_argument("--exp_seed", type=int, default=1)
+  parser.add_argument("--dist_seed", type=int, default=7)
+  parser.add_argument("--exp_seed", type=int, default=7)
   parser.add_argument("--write", type=str, default='append')
   parser.add_argument("--debug", action='store_true')
   parser.add_argument("--nondiff", action='store_true')
   parser.add_argument("--uncorrected", action='store_true')
   # parser.add_argument("--workdir", type=str, default='work/')
   parser.add_argument("--outdir", type=str, default="json/")
+
+  parser.add_argument("--influence_vars", type = str, default = None)
+
   args = parser.parse_args()
+
+  if args.influence_vars is not None:
+    args.influence_vars = args.influence_vars.split(",")
 
   n_examples = int(10 ** args.logn_examples)
   if args.logn_train < 0:
@@ -714,7 +803,9 @@ def main():
               'train_percent': args.train_percent,
               'dist_seed': args.dist_seed, 'c_dim': args.c_dim,
               'bootstrap': args.bootstrap, 'ay_effect': args.ay_effect,
-              'sample_err_rates': args.sample_err_rates, 'nondiff': args.nondiff}
+              'sample_err_rates': args.sample_err_rates, 'nondiff': args.nondiff, 'influence_vars' : args.influence_vars}
+  
+  
   if args.dataset == 'synthetic':
     test_func = synthetic
     job_args['vocab_size'] = args.vocab_size
@@ -764,6 +855,10 @@ def main():
       means.get('min', np.nan),
       means.get('p5.0', np.nan), means.get('mean', np.nan),
       means.get('p95.0', np.nan), means.get('max', np.nan)))
+
+  print("standard deviation: {:.5f}".format(
+    stds.get('min', np.nan)))
+  
 
   outfn = os.path.join(args.outdir, get_outfn(args))
 
