@@ -52,6 +52,19 @@ def construct_proxy_dist(test_dist, classifier_error,
         err = err1
       true_errs[assn] = err
   else:
+    combos = list(itertools.product(*[range(2) for _ in range(full_dim)]))
+    influence_vars = []
+    indices = [i for i in range(len(test_dist.columns)) if test_dist.columns[i] in influence_vars]
+    for assn in itertools.product(*[range(2) for _ in range(len(indices))]):
+      err = np.random.normal(classifier_error, classifier_error / 4)
+      index_vals = dict(zip(indices, assn))
+      for combo in combos:
+        y = combo
+        x = [n for n in range(len(combo))]
+        if all(item in dict(zip(x, y)).items() for item in index_vals.items()):
+          true_errs[combo] = err
+
+
     raise NotImplementedError
     specific_errs = np.random.normal(0, classifier_error / 2, size=2 ** err_dim - 1)
     specific_errs = np.clip(specific_errs, -classifier_error, classifier_error)
