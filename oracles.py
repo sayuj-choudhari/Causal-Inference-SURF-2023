@@ -52,17 +52,44 @@ def construct_proxy_dist(test_dist, classifier_error,
         err = err1
       true_errs[assn] = err
   else:
+    # combos = list(itertools.product(*[range(2) for _ in range(full_dim)]))
+    # influence_vars = []
+    # indices = [i for i in range(len(test_dist.columns)) if test_dist.columns[i] in influence_vars]
+    # for assn in itertools.product(*[range(2) for _ in range(len(indices))]):
+    #   err = np.random.normal(classifier_error, classifier_error / 4)
+    #   index_vals = dict(zip(indices, assn))
+    #   for combo in combos:
+    #     y = combo
+    #     x = [n for n in range(len(combo))]
+    #     if all(item in dict(zip(x, y)).items() for item in index_vals.items()):
+    #       true_errs[combo] = err
+
     combos = list(itertools.product(*[range(2) for _ in range(full_dim)]))
-    influence_vars = []
-    indices = [i for i in range(len(test_dist.columns)) if test_dist.columns[i] in influence_vars]
+    diff_level = 8
+    indices = [i for i in range(diff_level)]
     for assn in itertools.product(*[range(2) for _ in range(len(indices))]):
       err = np.random.normal(classifier_error, classifier_error / 4)
       index_vals = dict(zip(indices, assn))
+      removal_list = []
       for combo in combos:
         y = combo
         x = [n for n in range(len(combo))]
+
         if all(item in dict(zip(x, y)).items() for item in index_vals.items()):
           true_errs[combo] = err
+          removal_list.append(combo)
+
+      for m in range(len(removal_list)):
+         combos.remove(removal_list[m])
+
+
+    errs = list(true_errs.values())
+    key_list = list(true_errs.keys())
+
+    adjusted_errs = [np.sqrt(spec_var / np.var(errs)) * element for element in errs]
+    adjusted_errs = adjusted_errs - np.mean(adjusted_errs) + spec_mean
+
+    true_errs = dict(zip(key_list, adjusted_errs))
 
 
     raise NotImplementedError
