@@ -11,6 +11,7 @@ from collections import OrderedDict, defaultdict
 import numpy as np
 import sklearn.linear_model
 from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score
 
 from datasets import SyntheticData
 from utils import Distribution, gformula, NumpySerializer
@@ -18,6 +19,8 @@ from utils import get_dist, get_fractional_dist
 from sensitivity import clopper_pearson_interval
 
 from line_profiler import LineProfiler
+
+import matplotlib.pyplot as plt
 
 
 def get_assn(truth_val, confound_assn, proxy_i):
@@ -398,6 +401,9 @@ def impute_and_correct_with_model(train, test, columns, proxy_var,
   # model.fit(train_features[:num_train, :], train[:num_train, proxy_i])
   model.fit(train[:num_train, feature_rows], train[:num_train, proxy_i])
 
+  # print(accuracy_score(model.predict(train[:num_train, feature_rows]), train[:num_train, proxy_i]))
+
+
   # true_dev = train_features[num_train:, :]
   # dev_preds = model.predict_proba(true_dev)
   dev_preds = model.predict_proba(train[num_train:, feature_rows])
@@ -405,6 +411,8 @@ def impute_and_correct_with_model(train, test, columns, proxy_var,
   true_dev_proxy = train[num_train:, :full_dim].copy().astype(np.float64)
   true_dev_proxy[:, proxy_i] = dev_preds[:, 0]
   true_dev_proxy_dist = get_fractional_dist(true_dev_proxy, columns, proxy_var)
+  # print(accuracy_score(dev_preds[:,0], train[num_train:, proxy_i]))
+  # import pdb; pdb.set_trace()
 
   # test_features = np.concatenate((test[:, :proxy_i], test[:, 1 + proxy_i:]),
   #                                axis=1)
@@ -554,7 +562,7 @@ def fractional_impute_and_correct(train, test, columns, proxy_var,
 
 def train_adjust(train, test, proxy_var, c_dim=1, u_dim=1,
                  bootstrap=1, sample_err_rates=0, alpha=None,
-                 train_percent=0.5, nondiff=False, debug=False, influence_vars = None):
+                 train_percent=0.5, nondiff=False, debug=False, influence_vars = None, impute_func = None):
   '''
   Given train and test data, train a logistic regression classifier to
     impute a proxy for the missing variables, then calculate the errors
@@ -567,7 +575,7 @@ def train_adjust(train, test, proxy_var, c_dim=1, u_dim=1,
   test_dist = get_dist(truth, columns)
   oracle_effect = gformula(test_dist)
 
-  new_dists, proxy = impute_and_correct_with_model(
+  new_dists, proxy = impute_func(
       train, test, columns, proxy_var,
       c_dim=c_dim, u_dim=u_dim, train_percent=train_percent,
       sample_err_rates=sample_err_rates, bootstrap=bootstrap, nondiff=nondiff,
@@ -613,7 +621,8 @@ def synthetic(n_examples, n_train, seed=None, **kwargs):
   u_dim = kwargs.get('u_dim', 1)
   ay_effect = kwargs.get('ay_effect', 0.1)
   dist_seed = kwargs.get('dist_seed')
-  nondiff_text = 'u0' if nondiff else None
+  nondiff_text = ",".join(kwargs.get('influence_vars'))
+  print(nondiff_text)
   sampler = SyntheticData(c_dim=c_dim, u_dim=u_dim, nondiff_text=nondiff_text,
                           # topic_std=0.5,
                           ay_effect=ay_effect, seed=dist_seed)
@@ -634,6 +643,7 @@ def synthetic(n_examples, n_train, seed=None, **kwargs):
   bootstrap = kwargs.get('bootstrap', 1)
   train_percent = kwargs.get('train_percent', 0.5)
   influence_vars = kwargs.get('influence_vars')
+  impute_func = kwargs.get('impute_func')
 
   train = np.concatenate([external, external_t], axis=1)
   test = np.concatenate([truth, truth_t], axis=1)
@@ -646,7 +656,7 @@ def synthetic(n_examples, n_train, seed=None, **kwargs):
       bootstrap=bootstrap,
       train_percent=train_percent,
       nondiff=nondiff,
-      alpha=alpha, debug=debug, influence_vars = influence_vars)
+      alpha=alpha, debug=debug, influence_vars = influence_vars, impute_func = impute_func)
 
   # import pdb; pdb.set_trace()
   if kwargs.get('uncorrected', False):
@@ -739,10 +749,12 @@ def get_outfn(args):
 
 
 # @profile
-def main():
+def main(method = None, influencers = None, cdim = None):
+  # seed, method = None, influencers = None
   parser = argparse.ArgumentParser()
-  parser.add_argument("logn_examples", type=float, help="how many examples (log 10)")
-  parser.add_argument("--k", type=int, default=1, help="how many runs for each?")
+  parser.add_argument("--logn_examples", type=float, default = 4, help="how many examples (log 10)")
+
+  parser.add_argument("--k", type=int, default=4, help="how many runs for each?")
   parser.add_argument("--dataset", type=str, default='synthetic')
   parser.add_argument("--min_freq", type=int, default=10,
                       help="min freq for yelp data vocabulary")
@@ -765,8 +777,8 @@ def main():
                       help="dimensionality of c")
   parser.add_argument("--u_dim", type=int, default=1,
                       help="dimensionality of u")
-  parser.add_argument("--dist_seed", type=int, default=7)
-  parser.add_argument("--exp_seed", type=int, default=7)
+  parser.add_argument("--dist_seed", type=int, default=2)
+  parser.add_argument("--exp_seed", type=int, default=2)
   parser.add_argument("--write", type=str, default='append')
   parser.add_argument("--debug", action='store_true')
   parser.add_argument("--nondiff", action='store_true')
@@ -776,10 +788,29 @@ def main():
 
   parser.add_argument("--influence_vars", type = str, default = None)
 
+  parser.add_argument("--method_type", type = str, default = None)
+
   args = parser.parse_args()
+
+  # args.dist_seed = seed
+  # args.exp_seed = seed
+
+  if method is not None:
+    args.method_type = "new"
+
+  if influencers is not None:
+    args.influence_vars = influencers
 
   if args.influence_vars is not None:
     args.influence_vars = args.influence_vars.split(",")
+
+  if cdim is not None:
+    args.c_dim = cdim
+
+  if args.method_type is not None:
+    impute_func = impute_and_correct_with_model
+  else:
+    impute_func = fractional_impute_and_correct
 
   n_examples = int(10 ** args.logn_examples)
   if args.logn_train < 0:
@@ -803,7 +834,7 @@ def main():
               'train_percent': args.train_percent,
               'dist_seed': args.dist_seed, 'c_dim': args.c_dim,
               'bootstrap': args.bootstrap, 'ay_effect': args.ay_effect,
-              'sample_err_rates': args.sample_err_rates, 'nondiff': args.nondiff, 'influence_vars' : args.influence_vars}
+              'sample_err_rates': args.sample_err_rates, 'nondiff': args.nondiff, 'influence_vars' : args.influence_vars, 'impute_func' : impute_func}
   
   
   if args.dataset == 'synthetic':
@@ -874,5 +905,28 @@ def main():
       obj['mean_abs_{}'.format(key)] = mean_abs[key]
     outf.write("{}\n".format(json.dumps(obj, cls=NumpySerializer)))
 
+  return means.get('min', np.nan_to_num)
+
 if __name__ == "__main__":
-  main()
+  influencer = 'a,y,c0'
+
+  influence_size = []
+  error_matrix_data = []
+  model_data = []
+
+
+  for i in range(1, 3):
+    error_matrix_data.append(abs(main(influencers = influencer, cdim = i)))
+    model_data.append(abs(main(method = "new", influencers = influencer, cdim = i)))
+    influencer += ",c" + str(i)
+    influence_size.append(2 + i)
+
+  plt.figure()
+  plt.plot(influence_size, error_matrix_data, label = 'Error matrix data')
+  plt.plot(influence_size, model_data, label = 'Model data')
+  plt.legend()
+  plt.title("Comparison of measurement error correction performance")
+  plt.xlabel("# of influencing variables")
+  plt.ylabel("Error rate")
+
+  plt.show()

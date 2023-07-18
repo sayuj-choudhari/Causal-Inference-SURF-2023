@@ -62,11 +62,12 @@ class SyntheticData:
          np.zeros(self.vocab_size - num_nonzero_effects)])
     np.random.shuffle(topic_effects_mask)
     topic_effects *= topic_effects_mask
+    #specify specific variables
     if self.nondiff_text is not None:
+      var_list = self.nondiff_text.split(',')
       for i, var in enumerate(self.dist.columns):
-        if var != self.nondiff_text:
+        if var not in var_list:
           topic_effects[i, :] = np.zeros(self.vocab_size)
-
     return topic_effects
 
   def true_dist(self, round_to=None):
@@ -96,6 +97,7 @@ class SyntheticData:
     words = []
     for i in range(n):
       word = (np.random.random(self.vocab_size) < topic[i]).astype(np.int32)
+      print(word)
       words.append(word)
     words = np.array(words)
     return words
@@ -196,5 +198,5 @@ def test_distribution_gformula():
 
 
 if __name__ == "__main__":
-  sd = SyntheticData(ay_effect=0.1, nondiff_text='u0')
+  sd = SyntheticData(ay_effect=0.1, nondiff_text='u0,c0')
   test_distribution_gformula()
