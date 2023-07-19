@@ -65,6 +65,7 @@ class SyntheticData:
     #specify specific variables
     if self.nondiff_text is not None:
       var_list = self.nondiff_text.split(',')
+      var_list.append('u0')
       for i, var in enumerate(self.dist.columns):
         if var not in var_list:
           topic_effects[i, :] = np.zeros(self.vocab_size)
@@ -97,7 +98,6 @@ class SyntheticData:
     words = []
     for i in range(n):
       word = (np.random.random(self.vocab_size) < topic[i]).astype(np.int32)
-      print(word)
       words.append(word)
     words = np.array(words)
     return words

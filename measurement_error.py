@@ -282,6 +282,8 @@ def train_error_model(proxy_arr, truth_arr, proxy_var, columns, influence_vars=N
 
   model = LogisticRegression()
   model.fit(influences, label_list)
+  # print(accuracy_score(model.predict(influences), label_list))
+  # import pdb; pdb.set_trace()
   return model
 
 def get_regression_corrected_dist(dist, proxy_var, model, influence_vars = None):
@@ -318,8 +320,6 @@ def get_regression_corrected_dist(dist, proxy_var, model, influence_vars = None)
     assn0 = {**non_proxy_assn, **{proxy_var: 1}}
     tuple_assn0 = tuple(assn0[col] for col in dist.columns)
     assn1 = {**non_proxy_assn, **{proxy_var: 0}}
-    # x = np.array(assn1[proxy_var])
-    # import pdb; pdb.set_trace()
     tuple_assn1 = tuple(assn1[col] for col in dist.columns)
     if influence_vars is not None:
       model_input1 = tuple(assn1[col] for col in influencers)
@@ -411,7 +411,8 @@ def impute_and_correct_with_model(train, test, columns, proxy_var,
   true_dev_proxy = train[num_train:, :full_dim].copy().astype(np.float64)
   true_dev_proxy[:, proxy_i] = dev_preds[:, 0]
   true_dev_proxy_dist = get_fractional_dist(true_dev_proxy, columns, proxy_var)
-  # print(accuracy_score(dev_preds[:,0], train[num_train:, proxy_i]))
+  train_accuracy = (accuracy_score(model.predict(train[num_train:, feature_rows]), train[num_train:, proxy_i]))
+  print(train_accuracy)
   # import pdb; pdb.set_trace()
 
   # test_features = np.concatenate((test[:, :proxy_i], test[:, 1 + proxy_i:]),
@@ -422,8 +423,12 @@ def impute_and_correct_with_model(train, test, columns, proxy_var,
   test_proxy[:, proxy_i] = test_preds[:, 0]
   true_test_proxy_dist = get_fractional_dist(test_proxy, columns, proxy_var)
 
+  accuracy = accuracy_score(model.predict(test[:, feature_rows]), test[:, proxy_i])
+  print(accuracy)
+
+
   correct_distribution = correct_with_model(true_test_proxy_dist, proxy_var, true_dev_proxy[:, :full_dim], dev_truth, influence_vars = influence_vars)
-  return [correct_distribution], true_dev_proxy_dist
+  return [correct_distribution], true_dev_proxy_dist, accuracy
 
 
 
@@ -562,7 +567,7 @@ def fractional_impute_and_correct(train, test, columns, proxy_var,
 
 def train_adjust(train, test, proxy_var, c_dim=1, u_dim=1,
                  bootstrap=1, sample_err_rates=0, alpha=None,
-                 train_percent=0.5, nondiff=False, debug=False, influence_vars = None, impute_func = None):
+                 train_percent=0.5, nondiff=False, debug=False, influence_vars = None, impute_func = None, method_type = None):
   '''
   Given train and test data, train a logistic regression classifier to
     impute a proxy for the missing variables, then calculate the errors
@@ -575,14 +580,24 @@ def train_adjust(train, test, proxy_var, c_dim=1, u_dim=1,
   test_dist = get_dist(truth, columns)
   oracle_effect = gformula(test_dist)
 
-  new_dists, proxy = impute_func(
-      train, test, columns, proxy_var,
-      c_dim=c_dim, u_dim=u_dim, train_percent=train_percent,
-      sample_err_rates=sample_err_rates, bootstrap=bootstrap, nondiff=nondiff,
-      alpha=alpha, debug=debug, influence_vars = influence_vars)
+  if method_type is not None:
+    new_dists, proxy, accuracy = impute_func(
+        train, test, columns, proxy_var,
+        c_dim=c_dim, u_dim=u_dim, train_percent=train_percent,
+        sample_err_rates=sample_err_rates, bootstrap=bootstrap, nondiff=nondiff,
+        alpha=alpha, debug=debug, influence_vars = influence_vars)
+    return test_dist, new_dists, proxy, accuracy
+  else:
+    new_dists, proxy = impute_func(
+        train, test, columns, proxy_var,
+        c_dim=c_dim, u_dim=u_dim, train_percent=train_percent,
+        sample_err_rates=sample_err_rates, bootstrap=bootstrap, nondiff=nondiff,
+        alpha=alpha, debug=debug, influence_vars = influence_vars)
+    return test_dist, new_dists, proxy
+
   # print("have {} new dists".format(len(new_dists)))
 
-  return test_dist, new_dists, proxy
+
   # assert type(proxy) == Distribution
   # misspecified_effect = gformula(proxy)
 
@@ -624,7 +639,7 @@ def synthetic(n_examples, n_train, seed=None, **kwargs):
   nondiff_text = ",".join(kwargs.get('influence_vars'))
   print(nondiff_text)
   sampler = SyntheticData(c_dim=c_dim, u_dim=u_dim, nondiff_text=nondiff_text,
-                          # topic_std=0.5,
+                          topic_std=0.1,
                           ay_effect=ay_effect, seed=dist_seed)
   proxy_var = 'u0'
 
@@ -644,25 +659,39 @@ def synthetic(n_examples, n_train, seed=None, **kwargs):
   train_percent = kwargs.get('train_percent', 0.5)
   influence_vars = kwargs.get('influence_vars')
   impute_func = kwargs.get('impute_func')
+  method_type = kwargs.get('method_type')
 
   train = np.concatenate([external, external_t], axis=1)
   test = np.concatenate([truth, truth_t], axis=1)
   true_dist = sampler.dist
 
-  test_dist, new_dists, unc_proxy = train_adjust(
-      train, test, proxy_var,
-      c_dim=c_dim, u_dim=u_dim,
-      sample_err_rates=sample_err_rates,
-      bootstrap=bootstrap,
-      train_percent=train_percent,
-      nondiff=nondiff,
-      alpha=alpha, debug=debug, influence_vars = influence_vars, impute_func = impute_func)
+  if method_type is not None:
+    test_dist, new_dists, unc_proxy, accuracy = train_adjust(
+        train, test, proxy_var,
+        c_dim=c_dim, u_dim=u_dim,
+        sample_err_rates=sample_err_rates,
+        bootstrap=bootstrap,
+        train_percent=train_percent,
+        nondiff=nondiff,
+        alpha=alpha, debug=debug, influence_vars = influence_vars, impute_func = impute_func, method_type = method_type)
+  else:
+    test_dist, new_dists, unc_proxy = train_adjust(
+        train, test, proxy_var,
+        c_dim=c_dim, u_dim=u_dim,
+        sample_err_rates=sample_err_rates,
+        bootstrap=bootstrap,
+        train_percent=train_percent,
+        nondiff=nondiff,
+        alpha=alpha, debug=debug, influence_vars = influence_vars, impute_func = impute_func, method_type = method_type)
 
   # import pdb; pdb.set_trace()
   if kwargs.get('uncorrected', False):
     return true_dist, [unc_proxy]
 
-  return true_dist, new_dists
+  if method_type is not None:
+    return true_dist, new_dists, accuracy
+  else:
+    return true_dist, new_dists
 
 
 def get_results(test_dist, new_dists, extras=None, unknown_truth=False,
@@ -777,8 +806,8 @@ def main(method = None, influencers = None, cdim = None):
                       help="dimensionality of c")
   parser.add_argument("--u_dim", type=int, default=1,
                       help="dimensionality of u")
-  parser.add_argument("--dist_seed", type=int, default=2)
-  parser.add_argument("--exp_seed", type=int, default=2)
+  parser.add_argument("--dist_seed", type=int, default=4)
+  parser.add_argument("--exp_seed", type=int, default=4)
   parser.add_argument("--write", type=str, default='append')
   parser.add_argument("--debug", action='store_true')
   parser.add_argument("--nondiff", action='store_true')
@@ -834,7 +863,8 @@ def main(method = None, influencers = None, cdim = None):
               'train_percent': args.train_percent,
               'dist_seed': args.dist_seed, 'c_dim': args.c_dim,
               'bootstrap': args.bootstrap, 'ay_effect': args.ay_effect,
-              'sample_err_rates': args.sample_err_rates, 'nondiff': args.nondiff, 'influence_vars' : args.influence_vars, 'impute_func' : impute_func}
+              'sample_err_rates': args.sample_err_rates, 'nondiff': args.nondiff, 'influence_vars' : args.influence_vars, 'impute_func' : impute_func,
+              'method_type' : args.method_type}
   
   
   if args.dataset == 'synthetic':
@@ -849,12 +879,18 @@ def main(method = None, influencers = None, cdim = None):
 
   errors = defaultdict(list)
   raw_results = []
+  classifier_rates = []
   for i, seed in enumerate(exp_seeds):
     if args.debug:
       print(" {} ".format(i), end='\r')
     try:
-      truth, estimates = test_func(n_examples, n_train, seed, **job_args)
-      raw_results.append(get_results(truth, estimates, interval_widths=[90, 95]))
+      if args.method_type is not None:
+        truth, estimates, accuracy = test_func(n_examples, n_train, seed, **job_args)
+        classifier_rates.append(1 - accuracy)
+        raw_results.append(get_results(truth, estimates, interval_widths=[90, 95]))
+      else:
+        truth, estimates = test_func(n_examples, n_train, seed, **job_args)
+        raw_results.append(get_results(truth, estimates, interval_widths=[90, 95]))
     except Exception as e:
       if args.debug:
         raise e
@@ -905,28 +941,49 @@ def main(method = None, influencers = None, cdim = None):
       obj['mean_abs_{}'.format(key)] = mean_abs[key]
     outf.write("{}\n".format(json.dumps(obj, cls=NumpySerializer)))
 
-  return means.get('min', np.nan_to_num)
+  return [means.get('min', np.nan_to_num), stds.get('min', np.nan), np.mean(np.array(classifier_rates))]
 
 if __name__ == "__main__":
   influencer = 'a,y,c0'
 
   influence_size = []
   error_matrix_data = []
+  error_matrix_std = []
   model_data = []
+  model_std = []
+  classifier_rates = []
 
 
-  for i in range(1, 3):
-    error_matrix_data.append(abs(main(influencers = influencer, cdim = i)))
-    model_data.append(abs(main(method = "new", influencers = influencer, cdim = i)))
+  for i in range(1, 4):
+    matrix_list = main(influencers = influencer, cdim = i)
+    model_list = main(method = "new", influencers = influencer, cdim = i)
+    error_matrix_data.append(abs(matrix_list[0]))
+    error_matrix_std.append(matrix_list[1])
+    model_data.append(abs(model_list[0]))
+    model_std.append(model_list[1])
+    classifier_rates.append(model_list[2])
     influencer += ",c" + str(i)
     influence_size.append(2 + i)
 
-  plt.figure()
-  plt.plot(influence_size, error_matrix_data, label = 'Error matrix data')
-  plt.plot(influence_size, model_data, label = 'Model data')
+  fig1 = plt.figure()
+  plt.plot(influence_size, error_matrix_data, color = 'red', label = 'Error matrix data')
+  plt.plot(influence_size, model_data, color = 'blue', label = 'Model data')
+
+  plt.plot(influence_size, [a - b for a,b in zip(error_matrix_data, error_matrix_std)], linestyle = '--', color = 'red')
+  plt.plot(influence_size, [a - b for a,b in zip(model_data, model_std)], linestyle = '--', color = 'blue')
+
+  plt.plot(influence_size, [a + b for a,b in zip(error_matrix_data, error_matrix_std)], linestyle = '--', color = 'red')
+  plt.plot(influence_size, [a + b for a,b in zip(model_data, model_std)], linestyle = '--', color = 'blue')
+
   plt.legend()
   plt.title("Comparison of measurement error correction performance")
   plt.xlabel("# of influencing variables")
-  plt.ylabel("Error rate")
+  plt.ylabel("Corrected causal estimation error rate")
+
+  fig2 = plt.figure()
+  plt.plot(influence_size, classifier_rates)
+  plt.title("Error rates of U* classifier on test data")
+  plt.xlabel("# of influencing variables")
+  plt.ylabel("Classifier error rate")
 
   plt.show()
