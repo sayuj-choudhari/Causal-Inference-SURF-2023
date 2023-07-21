@@ -138,7 +138,7 @@ def count_where_assn(arr, columns, mapping):
   return true
 
 
-def calculate_error_matrix(proxy_arr, truth_arr, proxy_var, columns, sample=False,
+def calculate_error_matrix(experiment_data, proxy_arr, truth_arr, proxy_var, columns, sample=False,
                            alpha=None, nondiff=False, debug=False,
                            n_func=None, return_triple=False, influence_vars = None):
   '''
@@ -187,7 +187,10 @@ def calculate_error_matrix(proxy_arr, truth_arr, proxy_var, columns, sample=Fals
           confounds=confounds, confound_assn=confound_assn,
           alpha=alpha, n_func=n_func, return_triple=return_triple)
 
-  return Distribution(data=errs, columns=columns, normalized=False)
+
+  to_return = Distribution(data=errs, columns=columns, normalized=False)
+  experiment_data.set_err_matrix(to_return)
+  return to_return
 
 
 def get_corrected_dist(dist, err_dist, proxy_var, truth=None, debug=False):
@@ -247,7 +250,7 @@ def get_corrected_dist(dist, err_dist, proxy_var, truth=None, debug=False):
                            normalized=True)
   return corrected
 
-def train_error_model(proxy_arr, truth_arr, proxy_var, columns, influence_vars=None):
+def train_error_model(experiment_data, proxy_arr, truth_arr, proxy_var, columns, influence_vars=None):
   '''
     Given the proxy (A*) and truth (A), and all other features that influence A* (assumed
     to be all other variables if influence_vars is None) fits a logistic regression to
@@ -282,6 +285,9 @@ def train_error_model(proxy_arr, truth_arr, proxy_var, columns, influence_vars=N
 
   model = LogisticRegression()
   model.fit(influences, label_list)
+
+  experiment_data.set_model_coef(model.coef_)
+  experiment_data.set_model_int(model.intercept_)
   # print(accuracy_score(model.predict(influences), label_list))
   # import pdb; pdb.set_trace()
   return model
@@ -368,12 +374,14 @@ def get_regression_corrected_dist(dist, proxy_var, model, influence_vars = None)
                            normalized=True)
   return corrected
 
-def correct_with_model(dist, proxy_var, proxy_arr, truth_arr, influence_vars = None):
+def correct_with_model(experiment_data, dist, proxy_var, proxy_arr, truth_arr, influence_vars = None):
   
-  model = train_error_model(proxy_arr, truth_arr, proxy_var, dist.columns, influence_vars)
+  experiment_data.set_p_dot(dist.dict)
+
+  model = train_error_model(experiment_data, proxy_arr, truth_arr, proxy_var, dist.columns, influence_vars)
   return get_regression_corrected_dist(dist, proxy_var, model, influence_vars = influence_vars)
 
-def impute_and_correct_with_model(train, test, columns, proxy_var,
+def impute_and_correct_with_model(experiment_data, train, test, columns, proxy_var,
                                   train_percent=0.5, c_dim=1, u_dim=1,
                                   sample_err_rates=0, bootstrap=1,
                                   nondiff=False, alpha=None, debug=False, influence_vars = None):
@@ -427,7 +435,7 @@ def impute_and_correct_with_model(train, test, columns, proxy_var,
   print(accuracy)
 
 
-  correct_distribution = correct_with_model(true_test_proxy_dist, proxy_var, true_dev_proxy[:, :full_dim], dev_truth, influence_vars = influence_vars)
+  correct_distribution = correct_with_model(experiment_data, true_test_proxy_dist, proxy_var, true_dev_proxy[:, :full_dim], dev_truth, influence_vars = influence_vars)
   return [correct_distribution], true_dev_proxy_dist, accuracy
 
 
@@ -488,7 +496,7 @@ def correct(proxy_dist, proxy_var, err_ranges,
 
 
 # @profile
-def fractional_impute_and_correct(train, test, columns, proxy_var,
+def fractional_impute_and_correct(experiment_data, train, test, columns, proxy_var,
                                   train_percent=0.5, c_dim=1, u_dim=1,
                                   sample_err_rates=0, bootstrap=1,
                                   nondiff=False, alpha=None, debug=False, influence_vars = None):
@@ -524,12 +532,15 @@ def fractional_impute_and_correct(train, test, columns, proxy_var,
   true_dev_proxy[:, proxy_i] = dev_preds[:, 0]
   true_dev_proxy_dist = get_fractional_dist(true_dev_proxy, columns, proxy_var)
 
-  # test_features = np.concatenate((test[:, :proxy_i], test[:, 1 + proxy_i:]),
+  # test_features = np.concatenate((test[:, :proxy_i], test[:, 1 + proxy_i:])
   #                                axis=1)
   # test_preds = model.predict_proba(test_features)
   test_preds = model.predict_proba(test[:, feature_rows])
   test_proxy = test[:, :full_dim].copy().astype(np.float64)
   test_proxy[:, proxy_i] = test_preds[:, 0]
+
+  true_dist = get_fractional_dist(train[num_train:, :full_dim].copy().astype(np.float64), columns, proxy_var)
+  experiment_data.set_p_dot(true_dist.dict)
 
   new_dists = []
   for _ in range(bootstrap):
@@ -541,7 +552,7 @@ def fractional_impute_and_correct(train, test, columns, proxy_var,
       dev_proxy = true_dev_proxy
       dev = dev_truth
 
-    err_ranges = calculate_error_matrix(
+    err_ranges = calculate_error_matrix(experiment_data,
         dev_proxy, dev, proxy_var, columns,
         sample=sample_err_rates > 0,
         alpha=alpha, nondiff=nondiff, debug=debug, influence_vars = influence_vars)
@@ -565,7 +576,7 @@ def fractional_impute_and_correct(train, test, columns, proxy_var,
   return new_dists, true_dev_proxy_dist
 
 
-def train_adjust(train, test, proxy_var, c_dim=1, u_dim=1,
+def train_adjust(experiment_data, train, test, proxy_var, c_dim=1, u_dim=1,
                  bootstrap=1, sample_err_rates=0, alpha=None,
                  train_percent=0.5, nondiff=False, debug=False, influence_vars = None, impute_func = None, method_type = None):
   '''
@@ -581,14 +592,14 @@ def train_adjust(train, test, proxy_var, c_dim=1, u_dim=1,
   oracle_effect = gformula(test_dist)
 
   if method_type is not None:
-    new_dists, proxy, accuracy = impute_func(
+    new_dists, proxy, accuracy = impute_func(experiment_data,
         train, test, columns, proxy_var,
         c_dim=c_dim, u_dim=u_dim, train_percent=train_percent,
         sample_err_rates=sample_err_rates, bootstrap=bootstrap, nondiff=nondiff,
         alpha=alpha, debug=debug, influence_vars = influence_vars)
     return test_dist, new_dists, proxy, accuracy
   else:
-    new_dists, proxy = impute_func(
+    new_dists, proxy = impute_func(experiment_data,
         train, test, columns, proxy_var,
         c_dim=c_dim, u_dim=u_dim, train_percent=train_percent,
         sample_err_rates=sample_err_rates, bootstrap=bootstrap, nondiff=nondiff,
@@ -625,7 +636,7 @@ def train_adjust(train, test, proxy_var, c_dim=1, u_dim=1,
 
 
 # @profile
-def synthetic(n_examples, n_train, seed=None, **kwargs):
+def synthetic(experiment_data, n_examples, n_train, seed=None, **kwargs):
   '''
   Run a synthetic experiment using n_examples examples in target dataset p(A*, C, Y)
   and n_train examples of external data to estimate p(A*, A)
@@ -639,7 +650,7 @@ def synthetic(n_examples, n_train, seed=None, **kwargs):
   nondiff_text = ",".join(kwargs.get('influence_vars'))
   print(nondiff_text)
   sampler = SyntheticData(c_dim=c_dim, u_dim=u_dim, nondiff_text=nondiff_text,
-                          topic_std=0.1,
+                          topic_std=0.075,
                           ay_effect=ay_effect, seed=dist_seed)
   proxy_var = 'u0'
 
@@ -666,7 +677,7 @@ def synthetic(n_examples, n_train, seed=None, **kwargs):
   true_dist = sampler.dist
 
   if method_type is not None:
-    test_dist, new_dists, unc_proxy, accuracy = train_adjust(
+    test_dist, new_dists, unc_proxy, accuracy = train_adjust(experiment_data,
         train, test, proxy_var,
         c_dim=c_dim, u_dim=u_dim,
         sample_err_rates=sample_err_rates,
@@ -675,7 +686,7 @@ def synthetic(n_examples, n_train, seed=None, **kwargs):
         nondiff=nondiff,
         alpha=alpha, debug=debug, influence_vars = influence_vars, impute_func = impute_func, method_type = method_type)
   else:
-    test_dist, new_dists, unc_proxy = train_adjust(
+    test_dist, new_dists, unc_proxy = train_adjust(experiment_data,
         train, test, proxy_var,
         c_dim=c_dim, u_dim=u_dim,
         sample_err_rates=sample_err_rates,
@@ -775,6 +786,28 @@ def get_outfn(args):
   base = "me_{}".format(args.logn_examples)
   seeds = "-{}-{}-{}".format(args.dist_seed, args.exp_seed, args.k)
   return "{}{}.json".format(base, seeds)
+
+class Experimental_Data:
+  def __init__(self):
+      self.model_coef = None
+      self.model_int = None
+      self.err_matrix = None
+      self.p_dot = None
+
+  def set_model_coef(self, coef):
+      self.model_coef = coef
+
+  def set_model_int(self, intercept):
+    self.model_int = intercept
+
+  def set_err_matrix(self, matrix):
+    self.err_matrix = matrix
+
+  def set_p_dot(self, dist):
+    self.p_dot = dist
+
+  def get_p_dot(self):
+    print(self.p_dot.keys())
 
 
 # @profile
@@ -880,12 +913,13 @@ def main(method = None, influencers = None, cdim = None):
   errors = defaultdict(list)
   raw_results = []
   classifier_rates = []
+  experiment_data = Experimental_Data()
   for i, seed in enumerate(exp_seeds):
     if args.debug:
       print(" {} ".format(i), end='\r')
     try:
       if args.method_type is not None:
-        truth, estimates, accuracy = test_func(n_examples, n_train, seed, **job_args)
+        truth, estimates, accuracy = test_func(experiment_data, n_examples, n_train, seed, **job_args)
         classifier_rates.append(1 - accuracy)
         raw_results.append(get_results(truth, estimates, interval_widths=[90, 95]))
       else:
@@ -896,6 +930,8 @@ def main(method = None, influencers = None, cdim = None):
         raise e
       errors[type(e)].append(str(e))
       pass
+
+  experiment_data.get_p_dot()
 
   if len(errors) > 0:
     print(errors)
@@ -954,7 +990,7 @@ if __name__ == "__main__":
   classifier_rates = []
 
 
-  for i in range(1, 4):
+  for i in range(1, 10):
     matrix_list = main(influencers = influencer, cdim = i)
     model_list = main(method = "new", influencers = influencer, cdim = i)
     error_matrix_data.append(abs(matrix_list[0]))
@@ -965,12 +1001,13 @@ if __name__ == "__main__":
     influencer += ",c" + str(i)
     influence_size.append(2 + i)
 
+
   fig1 = plt.figure()
   plt.plot(influence_size, error_matrix_data, color = 'red', label = 'Error matrix data')
   plt.plot(influence_size, model_data, color = 'blue', label = 'Model data')
 
-  plt.plot(influence_size, [a - b for a,b in zip(error_matrix_data, error_matrix_std)], linestyle = '--', color = 'red')
-  plt.plot(influence_size, [a - b for a,b in zip(model_data, model_std)], linestyle = '--', color = 'blue')
+  plt.plot(influence_size, np.clip([a - b for a,b in zip(error_matrix_data, error_matrix_std)], 0, None), linestyle = '--', color = 'red')
+  plt.plot(influence_size, np.clip([a - b for a,b in zip(model_data, model_std)], 0, None), linestyle = '--', color = 'blue')
 
   plt.plot(influence_size, [a + b for a,b in zip(error_matrix_data, error_matrix_std)], linestyle = '--', color = 'red')
   plt.plot(influence_size, [a + b for a,b in zip(model_data, model_std)], linestyle = '--', color = 'blue')
@@ -987,3 +1024,4 @@ if __name__ == "__main__":
   plt.ylabel("Classifier error rate")
 
   plt.show()
+
