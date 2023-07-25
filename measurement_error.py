@@ -292,6 +292,7 @@ def train_error_model(experiment_data, proxy_arr, truth_arr, proxy_var, columns,
 
   experiment_data.set_model_coef(model.coef_)
   experiment_data.set_model_int(model.intercept_)
+  experiment_data.model = model
   # print(accuracy_score(model.predict(influences), label_list))
   # import pdb; pdb.set_trace()
   return model
@@ -437,6 +438,8 @@ def impute_and_correct_with_model(experiment_data, train, test, columns, proxy_v
 
   accuracy = accuracy_score(model.predict(test[:, feature_rows]), test[:, proxy_i])
   print(accuracy)
+
+  print(full_dim)
 
 
   correct_distribution = correct_with_model(experiment_data, true_test_proxy_dist, proxy_var, true_dev_proxy[:, :full_dim], dev_truth, influence_vars = influence_vars)
@@ -828,6 +831,7 @@ class Experimental_Data:
       self.err_matrix = None
       self.p_dot = None
       self.true_err = None
+      self.model = None
 
   def set_model_coef(self, coef):
       self.model_coef = coef
@@ -1025,7 +1029,7 @@ def main(method = None, influencers = None, cdim = None):
   return [means.get('min', np.nan_to_num), stds.get('min', np.nan), np.mean(np.array(classifier_rates)), experiment_data]
 
 if __name__ == "__main__":
-  influencer = 'a,y,c0'
+  influencer = 'a,y,c0,c1,c2,c3'
 
   influence_size = []
   error_matrix_data = []
@@ -1049,6 +1053,13 @@ if __name__ == "__main__":
 
     matrix_true_errs = np.array(matrix_true_errs)
     matrix_pred_errs = np.array(matrix_pred_errs).flatten()
+
+    model_pred_errs = []
+
+    for assn in model_experiment.p_dot.keys():
+      model_pred_errs.append(model_experiment.model.predict_proba(np.array(assn).reshape(1, -1)))
+
+    print(model_pred_errs)
 
 
     # absolute_differences = [abs(((1.0,) * len(matrix_experiment.err_matrix.dict) - (matrix_experiment.err_matrix.dict[key])) 
