@@ -8,7 +8,7 @@ import os
 from collections import OrderedDict, defaultdict
 
 from utils import gformula, Distribution, NumpySerializer
-from utils import get_dist, get_fractional_dist
+from utils import get_dist, get_fractional_dist, construct_proxy_dist
 from datasets import SyntheticData
 from measurement_error import get_results
 from measurement_error import get_corrected_dist, calculate_error_matrix
@@ -20,128 +20,7 @@ import scipy.optimize
 
 # def solve():
 
-def construct_proxy_dist(test_dist, classifier_error,
-                         proxy_var, nondiff=False):
-  # Construct the true error rates of the proxy distribution
-  # not_proxy_cols = [col for col in test_dist.columns if col != proxy_var]
-  # not_proxy_marg = test_dist.get_marginal(not_proxy_cols)
-  # err_dim = len(not_proxy_cols)
 
-  full_dim = len(test_dist.columns)
-  proxy_i = test_dist.columns.index(proxy_var)
-
-  true_errs = {}
-
-  if nondiff:
-    proxy_marg = test_dist.get_marginal([proxy_var])
-
-    err_margin = np.random.normal(0, classifier_error / 2)
-    err0 = classifier_error - err_margin / 2
-    err1 = classifier_error + err_margin / 2
-
-    total_err = err0 * proxy_marg.get(**{proxy_var: 0}) + err1 * proxy_marg.get(**{proxy_var: 1})
-    err0 = err0 * classifier_error / total_err
-    err1 = err1 * classifier_error / total_err
-
-    # print("true errs", err0, err1)
-    
-    for assn in itertools.product(*[range(2) for _ in range(full_dim)]):
-      if assn[proxy_i] == 0:
-        err = err0
-      else:
-        err = err1
-      true_errs[assn] = err
-  else:
-    # combos = list(itertools.product(*[range(2) for _ in range(full_dim)]))
-    # influence_vars = []
-    # indices = [i for i in range(len(test_dist.columns)) if test_dist.columns[i] in influence_vars]
-    # for assn in itertools.product(*[range(2) for _ in range(len(indices))]):
-    #   err = np.random.normal(classifier_error, classifier_error / 4)
-    #   index_vals = dict(zip(indices, assn))
-    #   for combo in combos:
-    #     y = combo
-    #     x = [n for n in range(len(combo))]
-    #     if all(item in dict(zip(x, y)).items() for item in index_vals.items()):
-    #       true_errs[combo] = err
-
-    combos = list(itertools.product(*[range(2) for _ in range(full_dim)]))
-    diff_level = 8
-    indices = [i for i in range(diff_level)]
-    for assn in itertools.product(*[range(2) for _ in range(len(indices))]):
-      err = np.random.normal(classifier_error, classifier_error / 4)
-      index_vals = dict(zip(indices, assn))
-      removal_list = []
-      for combo in combos:
-        y = combo
-        x = [n for n in range(len(combo))]
-
-        if all(item in dict(zip(x, y)).items() for item in index_vals.items()):
-          true_errs[combo] = err
-          removal_list.append(combo)
-
-      for m in range(len(removal_list)):
-         combos.remove(removal_list[m])
-
-
-    errs = list(true_errs.values())
-    key_list = list(true_errs.keys())
-
-    adjusted_errs = [np.sqrt(spec_var / np.var(errs)) * element for element in errs]
-    adjusted_errs = adjusted_errs - np.mean(adjusted_errs) + spec_mean
-
-    true_errs = dict(zip(key_list, adjusted_errs))
-
-
-    raise NotImplementedError
-    specific_errs = np.random.normal(0, classifier_error / 2, size=2 ** err_dim - 1)
-    specific_errs = np.clip(specific_errs, -classifier_error, classifier_error)
-
-    err_list = (classifier_error + specific_errs).tolist()
-    err_list.append(classifier_error - np.mean(specific_errs))
-
-    # ensure err list sums to classifier error
-    marg_probs = list(not_proxy_marg.dict.values())
-    delta = classifier_error - np.dot(marg_probs, err_list)
-    if not np.isclose(delta, 0):
-      # normalize errs so np.dot(p(err | vars) * p(vars)) = classifier_err
-      init = np.ones(2 ** err_dim)
-
-      def l2_fun(w):
-        return np.sum(np.square(w))
-
-      def cons_fun(w):
-        return np.dot(marg_probs, (np.array(err_list) - w)) + delta
-
-      cons = ({'type': 'eq', 'fun': cons_fun})
-      out = scipy.optimize.minimize(l2_fun, init, constraints=cons, method='SLSQP')
-      err_list = out.x
-
-      delta = classifier_error - np.dot(marg_probs, err_list)
-      assert np.isclose(delta, 0, atol=1e-3), delta
-
-    true_errs = {}
-    for i, err_assn in enumerate(itertools.product(*[range(2) for _ in range(err_dim)])):
-      for proxy_truth in range(2):
-        mapping = dict(zip(not_proxy_cols, err_assn), **{proxy_var: proxy_truth})
-        assn = tuple(mapping[col] for col in test_dist.columns)
-        true_errs[assn] = err_list[i]
-
-  proxy_dist = {}
-  for assn in itertools.product(*[range(2) for _ in range(full_dim)]):
-    # Choose the right error rates
-    err0 = true_errs[assn]
-    proxy_assn = dict(zip(test_dist.columns, assn))
-    proxy_dist[assn] = (1 - err0) * test_dist.get(**proxy_assn)
-
-    error_assn = proxy_assn.copy()
-    error_assn[proxy_var] = 1 - proxy_assn[proxy_var]
-    err1 = true_errs[tuple(error_assn[col] for col in test_dist.columns)]
-    proxy_dist[assn] += err1 * test_dist.get(**error_assn)
-
-  proxy_dist = Distribution(data=proxy_dist, columns=test_dist.columns)
-  true_errs = Distribution(data=true_errs, columns=test_dist.columns,
-                           normalized=False)
-  return proxy_dist, true_errs
 
 
 def double_oracle(sampler, classifier_error, corrector_error_width,
@@ -237,7 +116,7 @@ def classifier_oracle(sampler, classifier_error, n_dev, seed=None,
   proxy_var = 'u0'
   proxy_i = columns.index(proxy_var)
   true_proxy_dist, true_errs = construct_proxy_dist(
-      true_dist, classifier_error, proxy_var, nondiff=nondiff)
+      true_dist, classifier_error, proxy_var, spec_var = .1, spec_mean = .2, nondiff=nondiff)
 
   # # print_table outputs
   # print(gformula(get_corrected_dist(true_proxy_dist, true_errs, proxy_var)))

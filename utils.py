@@ -56,6 +56,96 @@ def get_fractional_dist(proxy_arr, columns, proxy_var, debug=False):
 
   return Distribution(data=dict(d), columns=columns)
 
+def construct_proxy_dist(test_dist, classifier_error,
+                         proxy_var, spec_var, nondiff=False):
+  # Construct the true error rates of the proxy distribution
+  # not_proxy_cols = [col for col in test_dist.columns if col != proxy_var]
+  # not_proxy_marg = test_dist.get_marginal(not_proxy_cols)
+  # err_dim = len(not_proxy_cols)
+
+  full_dim = len(test_dist.columns)
+  proxy_i = test_dist.columns.index(proxy_var)
+
+  true_errs = {}
+
+  if nondiff:
+    proxy_marg = test_dist.get_marginal([proxy_var])
+
+    err_margin = np.random.normal(0, classifier_error / 2)
+    err0 = classifier_error - err_margin / 2
+    err1 = classifier_error + err_margin / 2
+
+    total_err = err0 * proxy_marg.get(**{proxy_var: 0}) + err1 * proxy_marg.get(**{proxy_var: 1})
+    err0 = err0 * classifier_error / total_err
+    err1 = err1 * classifier_error / total_err
+
+    # print("true errs", err0, err1)
+    
+    for assn in itertools.product(*[range(2) for _ in range(full_dim)]):
+      if assn[proxy_i] == 0:
+        err = err0
+      else:
+        err = err1
+      true_errs[assn] = err
+  else:
+    # combos = list(itertools.product(*[range(2) for _ in range(full_dim)]))
+    # influence_vars = []
+    # indices = [i for i in range(len(test_dist.columns)) if test_dist.columns[i] in influence_vars]
+    # for assn in itertools.product(*[range(2) for _ in range(len(indices))]):
+    #   err = np.random.normal(classifier_error, classifier_error / 4)
+    #   index_vals = dict(zip(indices, assn))
+    #   for combo in combos:
+    #     y = combo
+    #     x = [n for n in range(len(combo))]
+    #     if all(item in dict(zip(x, y)).items() for item in index_vals.items()):
+    #       true_errs[combo] = err
+
+    combos = list(itertools.product(*[range(2) for _ in range(full_dim)]))
+    diff_level = full_dim
+    indices = [i for i in range(diff_level)]
+    for assn in itertools.product(*[range(2) for _ in range(len(indices))]):
+      err = np.random.normal(classifier_error, spec_var)
+      index_vals = dict(zip(indices, assn))
+      removal_list = []
+      for combo in combos:
+        y = combo
+        x = [n for n in range(len(combo))]
+
+        if all(item in dict(zip(x, y)).items() for item in index_vals.items()):
+          true_errs[combo] = err
+          removal_list.append(combo)
+
+      for m in range(len(removal_list)):
+         combos.remove(removal_list[m])
+
+
+    errs = list(true_errs.values())
+    key_list = list(true_errs.keys())
+
+
+
+    adjusted_errs = [np.sqrt(spec_var / np.var(errs)) * element for element in errs]
+    adjusted_errs = adjusted_errs - np.mean(adjusted_errs) + classifier_error
+
+    true_errs = dict(zip(key_list, adjusted_errs))
+
+  proxy_dist = {}
+  for assn in itertools.product(*[range(2) for _ in range(full_dim)]):
+    # Choose the right error rates
+    err0 = true_errs[assn]
+    proxy_assn = dict(zip(test_dist.columns, assn))
+    proxy_dist[assn] = (1 - err0) * test_dist.get(**proxy_assn)
+
+    error_assn = proxy_assn.copy()
+    error_assn[proxy_var] = 1 - proxy_assn[proxy_var]
+    err1 = true_errs[tuple(error_assn[col] for col in test_dist.columns)]
+    proxy_dist[assn] += err1 * test_dist.get(**error_assn)
+
+  proxy_dist = Distribution(data=proxy_dist, columns=test_dist.columns)
+  true_errs = Distribution(data=true_errs, columns=test_dist.columns,
+                           normalized=False)
+  return proxy_dist, true_errs
+
 
 class Distribution:
   def __init__(self, data=None, columns=None, proxy_var=None, normalized=True):
