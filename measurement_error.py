@@ -1041,17 +1041,24 @@ if __name__ == "__main__":
     model_experiment = model_list[3]
     matrix_experiment = matrix_list[3]
 
-    print(matrix_experiment.true_err.dict.values())
-    print(matrix_experiment.err_matrix.dict.values())
+    # print(matrix_experiment.true_err.dict.values())
+    # print(matrix_experiment.err_matrix.dict.values())
 
-    absolute_differences = [abs((1 - matrix_experiment.err_matrix.dict[key]) - matrix_experiment.true_err.dict[key]) for key in matrix_experiment.err_matrix.dict]
+    matrix_true_errs = [matrix_experiment.true_err.dict[key] for key in matrix_experiment.err_matrix.dict]
+    matrix_pred_errs = [matrix_experiment.err_matrix.dict[key] for key in matrix_experiment.err_matrix.dict]
 
-    print(absolute_differences)
+    matrix_true_errs = np.array(matrix_true_errs)
+    matrix_pred_errs = np.array(matrix_pred_errs).flatten()
+
+
+    # absolute_differences = [abs(((1.0,) * len(matrix_experiment.err_matrix.dict) - (matrix_experiment.err_matrix.dict[key])) 
+    #                             - (matrix_experiment.true_err.dict[key])) for key in matrix_experiment.err_matrix.dict]
+
 
     #to_plot = dict(zip(matrix_experiment.p_dot.values(), np.array(list(matrix_experiment.err_matrix.dict.values())) - np.array(list(matrix_experiment.true_err.dict.values()))))
 
     fig2 = plt.figure()
-    plt.scatter(list(matrix_experiment.p_dot.values()), absolute_differences)
+    plt.scatter(list(matrix_experiment.p_dot.values()), abs((np.ones(len(matrix_true_errs)) - matrix_pred_errs) - matrix_true_errs))
     plt.title("Matrix error rates versus probability distribution of assignment")
     plt.xlabel("Probability of assignment")
     plt.ylabel("Error rate of assignment")
