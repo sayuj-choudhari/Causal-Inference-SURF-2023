@@ -122,10 +122,11 @@ def construct_proxy_dist(test_dist, classifier_error,
     errs = list(true_errs.values())
     key_list = list(true_errs.keys())
 
-
-
     adjusted_errs = [np.sqrt(spec_var / np.var(errs)) * element for element in errs]
     adjusted_errs = adjusted_errs - np.mean(adjusted_errs) + classifier_error
+    adjusted_errs = np.clip(adjusted_errs, 0.01, 0.99)
+
+    print(f"proxy dist has err mean {np.mean(adjusted_errs):.3f} and var {np.var(adjusted_errs):.3f}")
 
     true_errs = dict(zip(key_list, adjusted_errs))
 
