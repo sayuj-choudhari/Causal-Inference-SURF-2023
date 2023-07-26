@@ -1055,7 +1055,7 @@ def main(method = None, influencers = None, cdim = None):
   return [means.get('min', np.nan_to_num), stds.get('min', np.nan), np.mean(np.array(classifier_rates)), experiment_data]
 
 if __name__ == "__main__":
-  influencer = 'a,y,c0,c1,c2'
+  influencer = 'a,y,c0,c1,c2,c3,c4'
 
   influence_size = []
   error_matrix_data = []
@@ -1064,7 +1064,7 @@ if __name__ == "__main__":
   model_std = []
   classifier_rates = []
 
-  for i in range(3, 4):
+  for i in range(5, 6):
     matrix_list = main(influencers = influencer, cdim = i)
     model_list = main(method = "new", influencers = influencer, cdim = i)
 
@@ -1084,11 +1084,18 @@ if __name__ == "__main__":
     model_pred_errs = []
 
     for assn in model_experiment.p_dot.keys():
-      print(model_experiment.model.predict_proba(np.array(assn).reshape(1, -1)))
       model_pred_errs.append(model_experiment.model.predict_proba(np.array(assn).reshape(1, -1))[0][1])
 
-    print(model_pred_errs)
-    print(model_true_errs)
+    print("Matrix true mean: {:.3f}".format(np.mean(matrix_true_errs)))
+    print("Matrix predicted mean: {:.3f}".format(np.mean(np.ones(len(matrix_true_errs)) - matrix_pred_errs)))
+    print("Model true mean: {:.3f}".format(np.mean(np.array(model_true_errs))))
+    print("Model predicted mean: {:.3f}".format(np.mean(np.array(model_pred_errs))))
+
+    print("Matrix true variance: {:.3f}".format(np.var(matrix_true_errs)))
+    print("Matrix predicted variance: {:.3f}".format(np.var(np.ones(len(matrix_true_errs)) - matrix_pred_errs)))
+    print("Model true variance {:.3f}".format(np.var(np.array(model_true_errs))))
+    print("Model predicted variance {:3f}".format(np.var(np.array(model_pred_errs))))
+
 
     
 
@@ -1100,8 +1107,8 @@ if __name__ == "__main__":
     #to_plot = dict(zip(matrix_experiment.p_dot.values(), np.array(list(matrix_experiment.err_matrix.dict.values())) - np.array(list(matrix_experiment.true_err.dict.values()))))
 
     fig2 = plt.figure()
-    plt.scatter(list(matrix_experiment.p_dot.values()), abs((np.ones(len(matrix_true_errs)) - matrix_pred_errs) - matrix_true_errs))
-    plt.scatter(list(model_experiment.p_dot.values()), abs(np.array(model_pred_errs) - np.array(model_true_errs)))
+    plt.scatter(list(matrix_experiment.p_dot.values()), abs((np.ones(len(matrix_true_errs)) - matrix_pred_errs) - matrix_true_errs), label = "Error matrix")
+    plt.scatter(list(model_experiment.p_dot.values()), abs(np.array(model_pred_errs) - np.array(model_true_errs)), label = "Model")
     plt.title("Matrix error rates versus probability distribution of assignment")
     plt.xlabel("Probability of assignment")
     plt.ylabel("Error rate of assignment")
