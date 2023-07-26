@@ -26,8 +26,6 @@ from line_profiler import LineProfiler
 
 import matplotlib.pyplot as plt
 
-import warnings
-warnings.simplefilter("error")
 
 def get_assn(truth_val, confound_assn, proxy_i):
   '''
