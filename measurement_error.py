@@ -422,8 +422,23 @@ def impute_and_correct_with_model(experiment_data, train, test, columns, proxy_v
   dev_preds = model.predict_proba(train[num_train:, feature_rows])
   dev_truth = train[num_train:, :full_dim]
   true_dev_proxy = train[num_train:, :full_dim].copy().astype(np.float64)
-  true_dev_proxy[:, proxy_i] = dev_preds[:, 0]
+  #true_dev_proxy[:, proxy_i] = dev_preds[:, 0]
   true_dev_proxy_dist = get_fractional_dist(true_dev_proxy, columns, proxy_var)
+
+  dev_proxy_dist, true_errs = construct_proxy_dist(true_dev_proxy_dist, .2, proxy_var, .005, nondiff = False)
+
+  new_data_array = np.copy(true_dev_proxy)  # Make a copy to store modified data
+
+
+  for i in range(true_dev_proxy.shape[0]):
+    combination = tuple(true_dev_proxy[i])
+    error_prob = true_errs.dict.get(combination, 0.0)  # Get the error probability, defaulting to 0 if not found
+    if random.random() < error_prob:
+      # If the random number is less than the error probability, switch U to the opposite value
+      new_data_array[i, proxy_i] = 1 - true_dev_proxy[i, proxy_i]
+
+  true_dev_proxy = new_data_array
+
   train_accuracy = (accuracy_score(model.predict(train[num_train:, feature_rows]), train[num_train:, proxy_i]))
   print(train_accuracy)
   # import pdb; pdb.set_trace()
@@ -433,7 +448,21 @@ def impute_and_correct_with_model(experiment_data, train, test, columns, proxy_v
   # test_preds = model.predict_proba(test_features)
   test_preds = model.predict_proba(test[:, feature_rows])
   test_proxy = test[:, :full_dim].copy().astype(np.float64)
-  test_proxy[:, proxy_i] = test_preds[:, 0]
+  # test_proxy[:, proxy_i] = test_preds[:, 0]
+
+  experiment_data.true_err = true_errs
+
+  new_data_array = np.copy(test_proxy)  # Make a copy to store modified data
+
+
+  for i in range(test_proxy.shape[0]):
+    combination = tuple(test_proxy[i])
+    error_prob = true_errs.dict.get(combination, 0.0)  # Get the error probability, defaulting to 0 if not found
+    if random.random() < error_prob:
+      # If the random number is less than the error probability, switch U to the opposite value
+      new_data_array[i, proxy_i] = 1 - test_proxy[i, proxy_i]
+
+  test_proxy = new_data_array
   true_test_proxy_dist = get_fractional_dist(test_proxy, columns, proxy_var)
 
   accuracy = accuracy_score(model.predict(test[:, feature_rows]), test[:, proxy_i])
@@ -539,15 +568,16 @@ def fractional_impute_and_correct(experiment_data, train, test, columns, proxy_v
   true_dev_proxy = train[num_train:, :full_dim].copy().astype(np.float64)
   #true_dev_proxy[:, proxy_i] = dev_preds[:, 0]
   true_dev_proxy_dist = get_fractional_dist(true_dev_proxy, columns, proxy_var)
+  experiment_data.set_p_dot(true_dev_proxy_dist.dict)
 
-  dev_proxy_dist, dev_true_errs = construct_proxy_dist(true_dev_proxy_dist, .2, proxy_var, .005, nondiff = False)
+  dev_proxy_dist, true_errs = construct_proxy_dist(true_dev_proxy_dist, .2, proxy_var, .005, nondiff = False)
 
   new_data_array = np.copy(true_dev_proxy)  # Make a copy to store modified data
 
 
   for i in range(true_dev_proxy.shape[0]):
     combination = tuple(true_dev_proxy[i])
-    error_prob = dev_true_errs.dict.get(combination, 0.0)  # Get the error probability, defaulting to 0 if not found
+    error_prob = true_errs.dict.get(combination, 0.0)  # Get the error probability, defaulting to 0 if not found
     if random.random() < error_prob:
       # If the random number is less than the error probability, switch U to the opposite value
       new_data_array[i, proxy_i] = 1 - true_dev_proxy[i, proxy_i]
@@ -559,9 +589,6 @@ def fractional_impute_and_correct(experiment_data, train, test, columns, proxy_v
   test_preds = model.predict_proba(test[:, feature_rows])
   test_proxy = test[:, :full_dim].copy().astype(np.float64)
   #test_proxy[:, proxy_i] = test_preds[:, 0]
-
-  experiment_data.set_p_dot(get_fractional_dist(test_proxy, columns, proxy_var).dict)
-  proxy_dist, true_errs = construct_proxy_dist(get_fractional_dist(test_proxy, columns, proxy_var), .2, proxy_var, .005, nondiff = False)
 
   experiment_data.true_err = true_errs
 
@@ -577,7 +604,6 @@ def fractional_impute_and_correct(experiment_data, train, test, columns, proxy_v
 
   test_proxy = new_data_array
   true_dist = get_fractional_dist(train[num_train:, :full_dim].copy().astype(np.float64), columns, proxy_var)
-  experiment_data.set_p_dot(true_dist.dict)
 
   new_dists = []
   for _ in range(bootstrap):
@@ -1029,7 +1055,7 @@ def main(method = None, influencers = None, cdim = None):
   return [means.get('min', np.nan_to_num), stds.get('min', np.nan), np.mean(np.array(classifier_rates)), experiment_data]
 
 if __name__ == "__main__":
-  influencer = 'a,y,c0,c1,c2,c3'
+  influencer = 'a,y,c0,c1,c2'
 
   influence_size = []
   error_matrix_data = []
@@ -1038,7 +1064,7 @@ if __name__ == "__main__":
   model_std = []
   classifier_rates = []
 
-  for i in range(4, 5):
+  for i in range(3, 4):
     matrix_list = main(influencers = influencer, cdim = i)
     model_list = main(method = "new", influencers = influencer, cdim = i)
 
@@ -1054,12 +1080,17 @@ if __name__ == "__main__":
     matrix_true_errs = np.array(matrix_true_errs)
     matrix_pred_errs = np.array(matrix_pred_errs).flatten()
 
+    model_true_errs = [model_experiment.true_err.dict[key] for key in matrix_experiment.err_matrix.dict]
     model_pred_errs = []
 
     for assn in model_experiment.p_dot.keys():
-      model_pred_errs.append(model_experiment.model.predict_proba(np.array(assn).reshape(1, -1)))
+      print(model_experiment.model.predict_proba(np.array(assn).reshape(1, -1)))
+      model_pred_errs.append(model_experiment.model.predict_proba(np.array(assn).reshape(1, -1))[0][1])
 
     print(model_pred_errs)
+    print(model_true_errs)
+
+    
 
 
     # absolute_differences = [abs(((1.0,) * len(matrix_experiment.err_matrix.dict) - (matrix_experiment.err_matrix.dict[key])) 
@@ -1070,6 +1101,7 @@ if __name__ == "__main__":
 
     fig2 = plt.figure()
     plt.scatter(list(matrix_experiment.p_dot.values()), abs((np.ones(len(matrix_true_errs)) - matrix_pred_errs) - matrix_true_errs))
+    plt.scatter(list(model_experiment.p_dot.values()), abs(np.array(model_pred_errs) - np.array(model_true_errs)))
     plt.title("Matrix error rates versus probability distribution of assignment")
     plt.xlabel("Probability of assignment")
     plt.ylabel("Error rate of assignment")
