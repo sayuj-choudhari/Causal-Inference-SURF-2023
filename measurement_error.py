@@ -165,7 +165,8 @@ def calculate_error_matrix(experiment_data, proxy_arr, truth_arr, proxy_var, col
     assert truth_arr.shape[1] == 1
 
   get_error_rate_func = get_fractional_error_rate
-  if proxy_arr.dtype == np.int64:
+  is_binary = np.all((proxy_arr == 0) | (proxy_arr == 1))
+  if is_binary:
     get_error_rate_func = get_error_rate
 
   errs = {}
