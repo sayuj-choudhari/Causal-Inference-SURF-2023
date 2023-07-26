@@ -312,7 +312,6 @@ def get_regression_corrected_dist(dist, proxy_var, model, influence_vars = None)
   #   model = train_error_model(proxy_arr, truth_arr, proxy_var, columns, influence_vars)
   # else:
   #   model = train_error_model(proxy_arr, truth_arr, proxy_var, columns)
-  
 
   non_proxy_columns = [col for col in dist.columns if col != proxy_var]
 
@@ -621,7 +620,7 @@ def fractional_impute_and_correct(experiment_data, train, test, columns, proxy_v
         alpha=alpha, nondiff=nondiff, debug=debug, influence_vars = influence_vars)
 
     if debug:
-      test_err = calculate_error_matrix(
+      test_err = calculate_error_matrix(experiment_data,
           test_proxy, test[:, :full_dim], proxy_var, columns,
           sample=sample_err_rates > 0,
           alpha=alpha, nondiff=nondiff, debug=debug, influence_vars = influence_vars)
