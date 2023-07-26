@@ -26,6 +26,8 @@ from line_profiler import LineProfiler
 
 import matplotlib.pyplot as plt
 
+import warnings
+warnings.simplefilter("error")
 
 def get_assn(truth_val, confound_assn, proxy_i):
   '''
@@ -340,11 +342,11 @@ def get_regression_corrected_dist(dist, proxy_var, model, influence_vars = None)
       # import pdb; pdb.set_trace()
       # print(influence_vars)
       # print(assn1)
-      err1 = model.predict_proba(np.array(model_input1).reshape(1, -1))[:, 1]
-      err0 = model.predict_proba(np.array(model_input0).reshape(1, -1))[:, 1]
+      err1 = model.predict_proba(np.array(model_input1).reshape(1, -1))[0, 1]
+      err0 = model.predict_proba(np.array(model_input0).reshape(1, -1))[0, 1]
     else: 
-      err1 = model.predict_proba(np.array(assn1[proxy_var]).reshape(-1, 1))[:, 1]
-      err0 = model.predict_proba(np.array(assn0[proxy_var]).reshape(-1, 1))[:, 1]
+      err1 = model.predict_proba(np.array(assn1[proxy_var]).reshape(-1, 1))[0, 1]
+      err0 = model.predict_proba(np.array(assn0[proxy_var]).reshape(-1, 1))[0, 1]
     # err0 = errs[get_assn(0, confound_assn, proxied_index)]
 
     if err1 + err0 != 1.0:
@@ -623,7 +625,7 @@ def fractional_impute_and_correct(experiment_data, train, test, columns, proxy_v
         alpha=alpha, nondiff=nondiff, debug=debug, influence_vars = influence_vars)
 
     if debug:
-      test_err = calculate_error_matrix(
+      test_err = calculate_error_matrix(experiment_data,
           test_proxy, test[:, :full_dim], proxy_var, columns,
           sample=sample_err_rates > 0,
           alpha=alpha, nondiff=nondiff, debug=debug, influence_vars = influence_vars)
@@ -820,9 +822,15 @@ def get_results(test_dist, new_dists, extras=None, unknown_truth=False,
   for w in interval_widths:
     low = percentiles[(100 - w) / 2]
     high = percentiles[w + (100 - w) / 2]
+
+    truncated_effects = corrected_effects[np.where(np.logical_and(
+          low < corrected_effects, corrected_effects < high))]
+
+    if len(truncated_effects) == 0:
+        continue
+
     d['trunc{}width'.format(w)] = min(1, high) - max(-1, low)
-    truncated_mean = np.mean(corrected_effects[np.where(np.logical_and(
-        low < corrected_effects, corrected_effects < high))])
+    truncated_mean = np.mean(truncated_effects)
     d['trunc{}mean'.format(w)] = truncated_mean - oracle_effect
 
     low_overlap = oracle_effect - low
@@ -1061,7 +1069,11 @@ def main(method = None, influencers = None, cdim = None):
       obj['mean_abs_{}'.format(key)] = mean_abs[key]
     outf.write("{}\n".format(json.dumps(obj, cls=NumpySerializer)))
 
-  return [means.get('min', np.nan_to_num), stds.get('min', np.nan), np.mean(np.array(classifier_rates)), experiment_data]
+  if len(classifier_rates) > 0:
+      mean_classifier_rate = np.mean(np.array(classifier_rates))
+  else:
+      mean_classifier_rate = np.nan
+  return [means.get('min', np.nan_to_num), stds.get('min', np.nan), mean_classifier_rate, experiment_data]
 
 if __name__ == "__main__":
   influencer = 'a,y,c0,c1,c2'
@@ -1129,7 +1141,7 @@ if __name__ == "__main__":
     print("Matrix Corr {:.3f}".format(np.corrcoef(p_values, matrix_abs_diffs)[0, 1]))
     print("Model Corr {:.3f}".format(np.corrcoef(p_values, model_abs_diffs)[0, 1]))
   
-  import pdb; pdb.set_trace()
+  # import pdb; pdb.set_trace()
   import sys; sys.exit()
 
 
