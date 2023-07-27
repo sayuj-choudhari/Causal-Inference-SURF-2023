@@ -14,6 +14,7 @@ from statistics import variance
 import numpy as np
 import sklearn.linear_model
 from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score
 
 from datasets import SyntheticData
@@ -291,8 +292,8 @@ def train_error_model(experiment_data, proxy_arr, truth_arr, proxy_var, columns,
   model = LogisticRegression()
   model.fit(influences, label_list)
 
-  experiment_data.set_model_coef(model.coef_)
-  experiment_data.set_model_int(model.intercept_)
+  # experiment_data.set_model_coef(model.coef_)
+  # experiment_data.set_model_int(model.intercept_)
   experiment_data.model = model
   # print(accuracy_score(model.predict(influences), label_list))
   # import pdb; pdb.set_trace()
@@ -320,9 +321,7 @@ def get_regression_corrected_dist(dist, proxy_var, model, influence_vars = None)
   corrected = {}
   if influence_vars is not None:
     influencers = influence_vars[:]
-    print(influence_vars)
     influencers.append(proxy_var)
-    print(influence_vars)
 
   print(influencers)
   for non_proxy_assn in itertools.product(*[range(2) for _ in range(full_dim - 1)]):
@@ -386,7 +385,24 @@ def correct_with_model(experiment_data, dist, proxy_var, proxy_arr, truth_arr, i
   model = train_error_model(experiment_data, proxy_arr, truth_arr, proxy_var, dist.columns, influence_vars)
   return get_regression_corrected_dist(dist, proxy_var, model, influence_vars = influence_vars)
 
-def impute_and_correct_with_model(experiment_data, train, test, columns, proxy_var,
+def calculate_model_error_rate(experiment_data, error_truth, error_proxy, full_dim, influence_vars, proxy_i, proxy_var, columns):
+  errs = {}
+  proxy_col = error_proxy[:, proxy_i]
+  truth_arr = error_truth[:, proxy_i]
+
+  indices = [i for i in range(full_dim) if columns[i] != proxy_var and columns[i] in influence_vars]
+  confounds = error_proxy[:, indices]
+  for assn in itertools.product(*[range(2) for _ in range(full_dim)]):
+    truth_val = assn[proxy_i]
+    proxy_val = 1 - truth_val
+    confound_assn = tuple(assn[i] for i in indices)
+    errs[assn] = get_fractional_error_rate(proxy_col, truth_arr, proxy_val, confounds=confounds, confound_assn=confound_assn)
+
+  experiment_data.true_err = errs
+
+
+
+def impute_and_correct_with_model(experiment_data, train, test, error, columns, proxy_var,
                                   train_percent=0.5, c_dim=1, u_dim=1,
                                   sample_err_rates=0, bootstrap=1,
                                   nondiff=False, alpha=None, debug=False, influence_vars = None):
@@ -422,24 +438,23 @@ def impute_and_correct_with_model(experiment_data, train, test, columns, proxy_v
   dev_preds = model.predict_proba(train[num_train:, feature_rows])
   dev_truth = train[num_train:, :full_dim]
   true_dev_proxy = train[num_train:, :full_dim].copy().astype(np.float64)
-  #true_dev_proxy[:, proxy_i] = dev_preds[:, 0]
+  true_dev_proxy[:, proxy_i] = dev_preds[:, 0]
   true_dev_proxy_dist = get_fractional_dist(true_dev_proxy, columns, proxy_var)
 
-  dev_proxy_dist, true_errs = construct_proxy_dist(true_dev_proxy_dist, .2, proxy_var, .005, nondiff = False)
+  # dev_proxy_dist, true_errs = construct_proxy_dist(true_dev_proxy_dist, .45, proxy_var, .005, nondiff = False)
 
-  new_data_array = np.copy(true_dev_proxy)  # Make a copy to store modified data
+  # new_data_array = np.copy(true_dev_proxy) 
 
 
-  for i in range(true_dev_proxy.shape[0]):
-    combination = tuple(true_dev_proxy[i])
-    error_prob = true_errs.dict.get(combination, 0.0)  # Get the error probability, defaulting to 0 if not found
-    if random.random() < error_prob:
-      # If the random number is less than the error probability, switch U to the opposite value
-      new_data_array[i, proxy_i] = 1 - true_dev_proxy[i, proxy_i]
+  # for i in range(true_dev_proxy.shape[0]):
+  #   combination = tuple(true_dev_proxy[i])
+  #   error_prob = true_errs.dict.get(combination, 0.0)
+  #   if random.random() < error_prob:
+  #     new_data_array[i, proxy_i] = 1 - true_dev_proxy[i, proxy_i]
 
-  true_dev_proxy = new_data_array
+  # true_dev_proxy = new_data_array
 
-  train_accuracy = (accuracy_score(model.predict(train[num_train:, feature_rows]), train[num_train:, proxy_i]))
+  train_accuracy = accuracy_score(model.predict(train[num_train:, feature_rows]), train[num_train:, proxy_i])
   print(train_accuracy)
   # import pdb; pdb.set_trace()
 
@@ -448,27 +463,37 @@ def impute_and_correct_with_model(experiment_data, train, test, columns, proxy_v
   # test_preds = model.predict_proba(test_features)
   test_preds = model.predict_proba(test[:, feature_rows])
   test_proxy = test[:, :full_dim].copy().astype(np.float64)
-  # test_proxy[:, proxy_i] = test_preds[:, 0]
+  test_proxy[:, proxy_i] = test_preds[:, 0]
 
-  experiment_data.true_err = true_errs
+  # experiment_data.true_err = true_errs
 
-  new_data_array = np.copy(test_proxy)  # Make a copy to store modified data
+  # new_data_array = np.copy(test_proxy) 
 
 
-  for i in range(test_proxy.shape[0]):
-    combination = tuple(test_proxy[i])
-    error_prob = true_errs.dict.get(combination, 0.0)  # Get the error probability, defaulting to 0 if not found
-    if random.random() < error_prob:
-      # If the random number is less than the error probability, switch U to the opposite value
-      new_data_array[i, proxy_i] = 1 - test_proxy[i, proxy_i]
+  # for i in range(test_proxy.shape[0]):
+  #   combination = tuple(test_proxy[i])
+  #   error_prob = true_errs.dict.get(combination, 0.0)
+  #   if random.random() < error_prob:
+  #     new_data_array[i, proxy_i] = 1 - test_proxy[i, proxy_i]
 
-  test_proxy = new_data_array
+  # test_proxy = new_data_array
   true_test_proxy_dist = get_fractional_dist(test_proxy, columns, proxy_var)
 
+  print(test[:, feature_rows].shape)
   accuracy = accuracy_score(model.predict(test[:, feature_rows]), test[:, proxy_i])
   print(accuracy)
 
-  print(full_dim)
+  print(true_dev_proxy[:, :full_dim].shape)
+  print(true_dev_proxy[:, :full_dim])
+
+  error_preds = model.predict_proba(error[:, feature_rows])
+  error_truth = error[:, :full_dim].copy().astype(np.float64)
+  error_proxy = error[:, :full_dim].copy().astype(np.float64)
+  error_proxy[:, proxy_i] = error_preds[:, 0]
+
+  calculate_model_error_rate(experiment_data, error_truth, error_proxy, full_dim, influence_vars, proxy_i, proxy_var, columns)
+
+
 
 
   correct_distribution = correct_with_model(experiment_data, true_test_proxy_dist, proxy_var, true_dev_proxy[:, :full_dim], dev_truth, influence_vars = influence_vars)
@@ -532,7 +557,7 @@ def correct(proxy_dist, proxy_var, err_ranges,
 
 
 # @profile
-def fractional_impute_and_correct(experiment_data, train, test, columns, proxy_var,
+def fractional_impute_and_correct(experiment_data, train, test, error, columns, proxy_var,
                                   train_percent=0.5, c_dim=1, u_dim=1,
                                   sample_err_rates=0, bootstrap=1,
                                   nondiff=False, alpha=None, debug=False, influence_vars = None):
@@ -552,7 +577,7 @@ def fractional_impute_and_correct(experiment_data, train, test, columns, proxy_v
 
   feature_rows = tuple(i for i in range(train.shape[1]) if i != proxy_i)
   # train_features = np.concatenate((train[:, :proxy_i], train[:, 1 + proxy_i:]),
-                                  # axis=1)
+  #                                 axis=1)
 
   num_train = int(train_percent * train.shape[0])
   num_dev = train.shape[0] - num_train
@@ -566,44 +591,59 @@ def fractional_impute_and_correct(experiment_data, train, test, columns, proxy_v
   dev_preds = model.predict_proba(train[num_train:, feature_rows])
   dev_truth = train[num_train:, :full_dim]
   true_dev_proxy = train[num_train:, :full_dim].copy().astype(np.float64)
-  #true_dev_proxy[:, proxy_i] = dev_preds[:, 0]
+
   true_dev_proxy_dist = get_fractional_dist(true_dev_proxy, columns, proxy_var)
   experiment_data.set_p_dot(true_dev_proxy_dist.dict)
 
-  dev_proxy_dist, true_errs = construct_proxy_dist(true_dev_proxy_dist, .2, proxy_var, .005, nondiff = False)
-
-  new_data_array = np.copy(true_dev_proxy)  # Make a copy to store modified data
+  true_dev_proxy[:, proxy_i] = dev_preds[:, 0]
 
 
-  for i in range(true_dev_proxy.shape[0]):
-    combination = tuple(true_dev_proxy[i])
-    error_prob = true_errs.dict.get(combination, 0.0)  # Get the error probability, defaulting to 0 if not found
-    if random.random() < error_prob:
-      # If the random number is less than the error probability, switch U to the opposite value
-      new_data_array[i, proxy_i] = 1 - true_dev_proxy[i, proxy_i]
+  # dev_proxy_dist, true_errs = construct_proxy_dist(true_dev_proxy_dist, .45, proxy_var, .005, nondiff = False)
 
-  true_dev_proxy = new_data_array
+  # new_data_array = np.copy(true_dev_proxy)  
+
+
+  # for i in range(true_dev_proxy.shape[0]):
+  #   combination = tuple(true_dev_proxy[i])
+  #   error_prob = true_errs.dict.get(combination, 0.0) 
+  #   if random.random() < error_prob:
+  #     new_data_array[i, proxy_i] = 1 - true_dev_proxy[i, proxy_i]
+
+
+  # true_dev_proxy = new_data_array
+  train_accuracy = (accuracy_score(model.predict(train[num_train:, feature_rows]), train[num_train:, proxy_i]))
+  print(train_accuracy)
   # test_features = np.concatenate((test[:, :proxy_i], test[:, 1 + proxy_i:])
   #                                axis=1)
   # test_preds = model.predict_proba(test_features)
   test_preds = model.predict_proba(test[:, feature_rows])
   test_proxy = test[:, :full_dim].copy().astype(np.float64)
-  #test_proxy[:, proxy_i] = test_preds[:, 0]
+  test_proxy[:, proxy_i] = test_preds[:, 0]
 
-  experiment_data.true_err = true_errs
+  # experiment_data.true_err = true_errs
 
-  new_data_array = np.copy(test_proxy)  # Make a copy to store modified data
+  # new_data_array = np.copy(test_proxy)  # Make a copy to store modified data
 
 
-  for i in range(test_proxy.shape[0]):
-    combination = tuple(test_proxy[i])
-    error_prob = true_errs.dict.get(combination, 0.0)  # Get the error probability, defaulting to 0 if not found
-    if random.random() < error_prob:
-      # If the random number is less than the error probability, switch U to the opposite value
-      new_data_array[i, proxy_i] = 1 - test_proxy[i, proxy_i]
+  # for i in range(test_proxy.shape[0]):
+  #   combination = tuple(test_proxy[i])
+  #   error_prob = true_errs.dict.get(combination, 0.0)  # Get the error probability, defaulting to 0 if not found
+  #   if random.random() < error_prob:
+  #     # If the random number is less than the error probability, switch U to the opposite value
+  #     new_data_array[i, proxy_i] = 1 - test_proxy[i, proxy_i]
 
-  test_proxy = new_data_array
+  # test_proxy = new_data_array
+  accuracy = accuracy_score(model.predict(test[:, feature_rows]), test[:, proxy_i])
+  print(accuracy)
   true_dist = get_fractional_dist(train[num_train:, :full_dim].copy().astype(np.float64), columns, proxy_var)
+
+  error_preds = model.predict_proba(error[:, feature_rows])
+  error_truth = error[:, :full_dim].copy().astype(np.float64)
+  error_proxy = error[:, :full_dim].copy().astype(np.float64)
+  error_proxy[:, proxy_i] = error_preds[:, 0]
+
+  calculate_model_error_rate(experiment_data, error_truth, error_proxy, full_dim, influence_vars, proxy_i, proxy_var, columns)
+
 
   new_dists = []
   for _ in range(bootstrap):
@@ -639,7 +679,7 @@ def fractional_impute_and_correct(experiment_data, train, test, columns, proxy_v
   return new_dists, true_dev_proxy_dist
 
 
-def train_adjust(experiment_data, train, test, proxy_var, c_dim=1, u_dim=1,
+def train_adjust(experiment_data, train, test, error, proxy_var, c_dim=1, u_dim=1,
                  bootstrap=1, sample_err_rates=0, alpha=None,
                  train_percent=0.5, nondiff=False, debug=False, influence_vars = None, impute_func = None, method_type = None):
   '''
@@ -656,14 +696,14 @@ def train_adjust(experiment_data, train, test, proxy_var, c_dim=1, u_dim=1,
 
   if method_type is not None:
     new_dists, proxy, accuracy = impute_func(experiment_data,
-        train, test, columns, proxy_var,
+        train, test, error, columns, proxy_var,
         c_dim=c_dim, u_dim=u_dim, train_percent=train_percent,
         sample_err_rates=sample_err_rates, bootstrap=bootstrap, nondiff=nondiff,
         alpha=alpha, debug=debug, influence_vars = influence_vars)
     return test_dist, new_dists, proxy, accuracy
   else:
     new_dists, proxy = impute_func(experiment_data,
-        train, test, columns, proxy_var,
+        train, test, error, columns, proxy_var,
         c_dim=c_dim, u_dim=u_dim, train_percent=train_percent,
         sample_err_rates=sample_err_rates, bootstrap=bootstrap, nondiff=nondiff,
         alpha=alpha, debug=debug, influence_vars = influence_vars)
@@ -699,7 +739,7 @@ def train_adjust(experiment_data, train, test, proxy_var, c_dim=1, u_dim=1,
 
 
 # @profile
-def synthetic(experiment_data, n_examples, n_train, seed=None, **kwargs):
+def synthetic(experiment_data, n_examples, n_train, error_samples, seed=None, **kwargs):
   '''
   Run a synthetic experiment using n_examples examples in target dataset p(A*, C, Y)
   and n_train examples of external data to estimate p(A*, A)
@@ -726,6 +766,10 @@ def synthetic(experiment_data, n_examples, n_train, seed=None, **kwargs):
   external = sampler.sample_truth(n_train)
   external_t = sampler.sample_text(external)
 
+
+  error = sampler.sample_truth(error_samples)
+  error_t = sampler.sample_text(error)
+
   debug = kwargs.get('debug', False)
   alpha = kwargs.get('alpha', None)
   sample_err_rates = kwargs.get('sample_err_rates', 0)
@@ -737,11 +781,12 @@ def synthetic(experiment_data, n_examples, n_train, seed=None, **kwargs):
 
   train = np.concatenate([external, external_t], axis=1)
   test = np.concatenate([truth, truth_t], axis=1)
+  error = np.concatenate([error, error_t], axis = 1)
   true_dist = sampler.dist
 
   if method_type is not None:
     test_dist, new_dists, unc_proxy, accuracy = train_adjust(experiment_data,
-        train, test, proxy_var,
+        train, test, error, proxy_var,
         c_dim=c_dim, u_dim=u_dim,
         sample_err_rates=sample_err_rates,
         bootstrap=bootstrap,
@@ -750,7 +795,7 @@ def synthetic(experiment_data, n_examples, n_train, seed=None, **kwargs):
         alpha=alpha, debug=debug, influence_vars = influence_vars, impute_func = impute_func, method_type = method_type)
   else:
     test_dist, new_dists, unc_proxy = train_adjust(experiment_data,
-        train, test, proxy_var,
+        train, test, error, proxy_var,
         c_dim=c_dim, u_dim=u_dim,
         sample_err_rates=sample_err_rates,
         bootstrap=bootstrap,
@@ -889,6 +934,8 @@ def main(method = None, influencers = None, cdim = None):
   parser = argparse.ArgumentParser()
   parser.add_argument("--logn_examples", type=float, default = 4, help="how many examples (log 10)")
 
+  parser.add_argument("--logn_error_rate", type = float, default = 3)
+
   parser.add_argument("--k", type=int, default=4, help="how many runs for each?")
   parser.add_argument("--dataset", type=str, default='synthetic')
   parser.add_argument("--min_freq", type=int, default=10,
@@ -912,8 +959,8 @@ def main(method = None, influencers = None, cdim = None):
                       help="dimensionality of c")
   parser.add_argument("--u_dim", type=int, default=1,
                       help="dimensionality of u")
-  parser.add_argument("--dist_seed", type=int, default=4)
-  parser.add_argument("--exp_seed", type=int, default=4)
+  parser.add_argument("--dist_seed", type=int, default=5)
+  parser.add_argument("--exp_seed", type=int, default=5)
   parser.add_argument("--write", type=str, default='append')
   parser.add_argument("--debug", action='store_true')
   parser.add_argument("--nondiff", action='store_true')
@@ -956,6 +1003,9 @@ def main(method = None, influencers = None, cdim = None):
   if args.debug:
     print("measure", n_examples, n_train, args.k, args.dataset, args.min_freq)
 
+  error_samples = int(10 ** args.logn_error_rate)
+
+
   outfn = "me.{}.{}.{}.{}.json".format(args.dataset, args.logn_examples, args.k, args.min_freq)
   if not os.path.exists(args.outdir):
     logging.error("{} doesn't exist, quitting".format(args.outdir))
@@ -992,11 +1042,11 @@ def main(method = None, influencers = None, cdim = None):
       print(" {} ".format(i), end='\r')
     try:
       if args.method_type is not None:
-        truth, estimates, accuracy = test_func(experiment_data, n_examples, n_train, seed, **job_args)
+        truth, estimates, accuracy = test_func(experiment_data, n_examples, n_train, error_samples, seed, **job_args)
         classifier_rates.append(1 - accuracy)
         raw_results.append(get_results(truth, estimates, interval_widths=[90, 95]))
       else:
-        truth, estimates = test_func(experiment_data, n_examples, n_train, seed, **job_args)
+        truth, estimates = test_func(experiment_data, n_examples, n_train, error_samples, seed, **job_args)
         raw_results.append(get_results(truth, estimates, interval_widths=[90, 95]))
     except Exception as e:
       if args.debug:
@@ -1055,7 +1105,7 @@ def main(method = None, influencers = None, cdim = None):
   return [means.get('min', np.nan_to_num), stds.get('min', np.nan), np.mean(np.array(classifier_rates)), experiment_data]
 
 if __name__ == "__main__":
-  influencer = 'a,y,c0,c1,c2,c3,c4'
+  influencer = 'a,y,c0'
 
   influence_size = []
   error_matrix_data = []
@@ -1064,55 +1114,55 @@ if __name__ == "__main__":
   model_std = []
   classifier_rates = []
 
-  for i in range(5, 6):
-    matrix_list = main(influencers = influencer, cdim = i)
-    model_list = main(method = "new", influencers = influencer, cdim = i)
+  # for i in range(3, 4):
+  #   matrix_list = main(influencers = influencer, cdim = i)
+  #   model_list = main(method = "new", influencers = influencer, cdim = i)
 
-    model_experiment = model_list[3]
-    matrix_experiment = matrix_list[3]
+  #   model_experiment = model_list[3]
+  #   matrix_experiment = matrix_list[3]
 
-    # print(matrix_experiment.true_err.dict.values())
-    # print(matrix_experiment.err_matrix.dict.values())
+  #   # print(matrix_experiment.true_err.dict.values())
+  #   # print(matrix_experiment.err_matrix.dict.values())
 
-    matrix_true_errs = [matrix_experiment.true_err.dict[key] for key in matrix_experiment.err_matrix.dict]
-    matrix_pred_errs = [matrix_experiment.err_matrix.dict[key] for key in matrix_experiment.err_matrix.dict]
+  #   matrix_true_errs = [matrix_experiment.true_err.dict[key] for key in matrix_experiment.err_matrix.dict]
+  #   matrix_pred_errs = [matrix_experiment.err_matrix.dict[key] for key in matrix_experiment.err_matrix.dict]
 
-    matrix_true_errs = np.array(matrix_true_errs)
-    matrix_pred_errs = np.array(matrix_pred_errs).flatten()
+  #   matrix_true_errs = np.array(matrix_true_errs)
+  #   matrix_pred_errs = np.array(matrix_pred_errs).flatten()
 
-    model_true_errs = [model_experiment.true_err.dict[key] for key in matrix_experiment.err_matrix.dict]
-    model_pred_errs = []
+  #   model_true_errs = [model_experiment.true_err.dict[key] for key in matrix_experiment.err_matrix.dict]
+  #   model_pred_errs = []
 
-    for assn in model_experiment.p_dot.keys():
-      model_pred_errs.append(model_experiment.model.predict_proba(np.array(assn).reshape(1, -1))[0][1])
+  #   for assn in model_experiment.p_dot.keys():
+  #     model_pred_errs.append(model_experiment.model.predict_proba(np.array(assn).reshape(1, -1))[0][1])
 
-    print("Matrix true mean: {:.3f}".format(np.mean(matrix_true_errs)))
-    print("Matrix predicted mean: {:.3f}".format(np.mean(np.ones(len(matrix_true_errs)) - matrix_pred_errs)))
-    print("Model true mean: {:.3f}".format(np.mean(np.array(model_true_errs))))
-    print("Model predicted mean: {:.3f}".format(np.mean(np.array(model_pred_errs))))
+  #   print("Matrix true mean: {:.3f}".format(np.mean(matrix_true_errs)))
+  #   print("Matrix predicted mean: {:.3f}".format(np.mean(matrix_pred_errs)))
+  #   print("Model true mean: {:.3f}".format(np.mean(np.array(model_true_errs))))
+  #   print("Model predicted mean: {:.3f}".format(np.mean(np.array(model_pred_errs))))
 
-    print("Matrix true variance: {:.3f}".format(np.var(matrix_true_errs)))
-    print("Matrix predicted variance: {:.3f}".format(np.var(np.ones(len(matrix_true_errs)) - matrix_pred_errs)))
-    print("Model true variance {:.3f}".format(np.var(np.array(model_true_errs))))
-    print("Model predicted variance {:3f}".format(np.var(np.array(model_pred_errs))))
+  #   print("Matrix true variance: {:.3f}".format(np.var(matrix_true_errs)))
+  #   print("Matrix predicted variance: {:.3f}".format(np.var(matrix_pred_errs)))
+  #   print("Model true variance {:.3f}".format(np.var(np.array(model_true_errs))))
+  #   print("Model predicted variance {:3f}".format(np.var(np.array(model_pred_errs))))
 
 
     
 
 
-    # absolute_differences = [abs(((1.0,) * len(matrix_experiment.err_matrix.dict) - (matrix_experiment.err_matrix.dict[key])) 
-    #                             - (matrix_experiment.true_err.dict[key])) for key in matrix_experiment.err_matrix.dict]
+  #   # absolute_differences = [abs(((1.0,) * len(matrix_experiment.err_matrix.dict) - (matrix_experiment.err_matrix.dict[key])) 
+  #   #                             - (matrix_experiment.true_err.dict[key])) for key in matrix_experiment.err_matrix.dict]
 
 
-    #to_plot = dict(zip(matrix_experiment.p_dot.values(), np.array(list(matrix_experiment.err_matrix.dict.values())) - np.array(list(matrix_experiment.true_err.dict.values()))))
+  #   #to_plot = dict(zip(matrix_experiment.p_dot.values(), np.array(list(matrix_experiment.err_matrix.dict.values())) - np.array(list(matrix_experiment.true_err.dict.values()))))
 
-    fig2 = plt.figure()
-    plt.scatter(list(matrix_experiment.p_dot.values()), abs((np.ones(len(matrix_true_errs)) - matrix_pred_errs) - matrix_true_errs), label = "Error matrix")
-    plt.scatter(list(model_experiment.p_dot.values()), abs(np.array(model_pred_errs) - np.array(model_true_errs)), label = "Model")
-    plt.title("Matrix error rates versus probability distribution of assignment")
-    plt.xlabel("Probability of assignment")
-    plt.ylabel("Error rate of assignment")
-    plt.show()
+  #   fig2 = plt.figure()
+  #   plt.scatter(list(matrix_experiment.p_dot.values()), abs(matrix_pred_errs - matrix_true_errs), label = "Error matrix")
+  #   plt.scatter(list(model_experiment.p_dot.values()), abs(np.array(model_pred_errs) - np.array(model_true_errs)), label = "Model")
+  #   plt.title("Matrix error rates versus probability distribution of assignment")
+  #   plt.xlabel("Probability of assignment")
+  #   plt.ylabel("Error rate of assignment")
+  #   plt.show()
 
   
 
@@ -1130,7 +1180,42 @@ if __name__ == "__main__":
     model_experiment = model_list[3]
     matrix_experiment = matrix_list[3]
 
+    print(matrix_experiment.true_err)
+    print(matrix_experiment.err_matrix.dict)
 
+    matrix_true_errs = [matrix_experiment.true_err[key] for key in matrix_experiment.err_matrix.dict]
+    matrix_pred_errs = [matrix_experiment.err_matrix.dict[key] for key in matrix_experiment.err_matrix.dict]
+
+    matrix_true_errs = np.array(matrix_true_errs)
+    matrix_pred_errs = np.array(matrix_pred_errs).flatten()
+
+
+    model_true_errs = [model_experiment.true_err[key] for key in matrix_experiment.err_matrix.dict]
+    model_pred_errs = []
+
+    for assn in model_experiment.p_dot.keys():
+      model_pred_errs.append(model_experiment.model.predict_proba(np.array(assn).reshape(1, -1))[0][1])
+
+    print("Matrix true mean: {:.3f}".format(np.mean(matrix_true_errs)))
+    print("Matrix predicted mean: {:.3f}".format(np.mean(matrix_pred_errs)))
+    print("Model true mean: {:.3f}".format(np.mean(np.array(model_true_errs))))
+    print("Model predicted mean: {:.3f}".format(np.mean(np.array(model_pred_errs))))
+
+    print("Matrix true variance: {:.3f}".format(np.var(matrix_true_errs)))
+    print("Matrix predicted variance: {:.3f}".format(np.var(matrix_pred_errs)))
+    print("Model true variance {:.3f}".format(np.var(np.array(model_true_errs))))
+    print("Model predicted variance {:3f}".format(np.var(np.array(model_pred_errs))))
+
+    print(len(list(matrix_experiment.p_dot.values())), len(abs(matrix_pred_errs - matrix_true_errs)))
+    print(len(list(model_experiment.p_dot.values())), len(abs(np.array(model_pred_errs) - np.array(model_true_errs))))
+    fig2 = plt.figure()
+    plt.scatter(list(matrix_experiment.p_dot.values()), abs(matrix_pred_errs - matrix_true_errs), label = "Error matrix")
+    plt.scatter(list(model_experiment.p_dot.values()), abs(np.array(model_pred_errs) - np.array(model_true_errs)), label = "Model")
+    plt.legend()
+    plt.title("Matrix error rates versus probability distribution of assignment")
+    plt.xlabel("Probability of assignment")
+    plt.ylabel("Error rate of assignment")
+    plt.show()
 
   fig1 = plt.figure()
   plt.plot(influence_size, error_matrix_data, color = 'red', label = 'Error matrix data')
