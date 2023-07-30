@@ -9,7 +9,7 @@ from utils import construct_proxy_dist, get_fractional_dist, get_dist
 
 def experiment(fractional=False, logn_examples=2, seed=1):
     proxy_var = "u0"
-    mean = 0.01
+    mean = 0.2
     var = 0.005
     fractional_logit = 0.8
 
@@ -61,8 +61,8 @@ def experiment(fractional=False, logn_examples=2, seed=1):
 
 
 def main():
-    logn_examples = [2, 3, 4]
-    seeds = range(1, 20)
+    logn_examples = [2, 3, 4, 5]
+    seeds = range(1, 10)
     agg = np.mean
 
     # Run experiments
