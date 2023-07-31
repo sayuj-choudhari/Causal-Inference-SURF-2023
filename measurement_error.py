@@ -379,8 +379,6 @@ def get_regression_corrected_dist(dist, proxy_var, model, influence_vars = None)
   return corrected
 
 def correct_with_model(experiment_data, dist, proxy_var, proxy_arr, truth_arr, influence_vars = None):
-  
-  experiment_data.set_p_dot(dist.dict)
 
   model = train_error_model(experiment_data, proxy_arr, truth_arr, proxy_var, dist.columns, influence_vars)
   return get_regression_corrected_dist(dist, proxy_var, model, influence_vars = influence_vars)
@@ -438,8 +436,11 @@ def impute_and_correct_with_model(experiment_data, train, test, error, columns, 
   dev_preds = model.predict_proba(train[num_train:, feature_rows])
   dev_truth = train[num_train:, :full_dim]
   true_dev_proxy = train[num_train:, :full_dim].copy().astype(np.float64)
-  true_dev_proxy[:, proxy_i] = dev_preds[:, 0]
   true_dev_proxy_dist = get_fractional_dist(true_dev_proxy, columns, proxy_var)
+
+  experiment_data.set_p_dot(true_dev_proxy_dist.dict)
+
+  true_dev_proxy[:, proxy_i] = dev_preds[:, 0]
 
   # dev_proxy_dist, true_errs = construct_proxy_dist(true_dev_proxy_dist, .45, proxy_var, .005, nondiff = False)
 
@@ -455,7 +456,7 @@ def impute_and_correct_with_model(experiment_data, train, test, error, columns, 
   # true_dev_proxy = new_data_array
 
   train_accuracy = accuracy_score(model.predict(train[num_train:, feature_rows]), train[num_train:, proxy_i])
-  print(train_accuracy)
+  print("Train set classifier accuracy: {:.3f}".format(train_accuracy))
   # import pdb; pdb.set_trace()
 
   # test_features = np.concatenate((test[:, :proxy_i], test[:, 1 + proxy_i:]),
@@ -479,18 +480,16 @@ def impute_and_correct_with_model(experiment_data, train, test, error, columns, 
   # test_proxy = new_data_array
   true_test_proxy_dist = get_fractional_dist(test_proxy, columns, proxy_var)
 
-  print(test[:, feature_rows].shape)
   accuracy = accuracy_score(model.predict(test[:, feature_rows]), test[:, proxy_i])
-  print(accuracy)
-
-  print(true_dev_proxy[:, :full_dim].shape)
-  print(true_dev_proxy[:, :full_dim])
+  print("Test set classifier accuracy: {:.3f}".format(accuracy))
 
   error_preds = model.predict_proba(error[:, feature_rows])
   error_truth = error[:, :full_dim].copy().astype(np.float64)
   error_proxy = error[:, :full_dim].copy().astype(np.float64)
   error_proxy[:, proxy_i] = error_preds[:, 0]
 
+  accuracy = accuracy_score(model.predict(error[:, feature_rows]), error[:, proxy_i])
+  print("Large sample classifier accuracy: {:.3f}".format(accuracy))
   calculate_model_error_rate(experiment_data, error_truth, error_proxy, full_dim, influence_vars, proxy_i, proxy_var, columns)
 
 
@@ -612,7 +611,7 @@ def fractional_impute_and_correct(experiment_data, train, test, error, columns, 
 
   # true_dev_proxy = new_data_array
   train_accuracy = (accuracy_score(model.predict(train[num_train:, feature_rows]), train[num_train:, proxy_i]))
-  print(train_accuracy)
+  print("train set classifier accuracy: {:.3f}".format(train_accuracy))
   # test_features = np.concatenate((test[:, :proxy_i], test[:, 1 + proxy_i:])
   #                                axis=1)
   # test_preds = model.predict_proba(test_features)
@@ -634,7 +633,7 @@ def fractional_impute_and_correct(experiment_data, train, test, error, columns, 
 
   # test_proxy = new_data_array
   accuracy = accuracy_score(model.predict(test[:, feature_rows]), test[:, proxy_i])
-  print(accuracy)
+  print("test set classifier accuracy: {:.3f}".format(accuracy))
   true_dist = get_fractional_dist(train[num_train:, :full_dim].copy().astype(np.float64), columns, proxy_var)
 
   error_preds = model.predict_proba(error[:, feature_rows])
@@ -642,6 +641,8 @@ def fractional_impute_and_correct(experiment_data, train, test, error, columns, 
   error_proxy = error[:, :full_dim].copy().astype(np.float64)
   error_proxy[:, proxy_i] = error_preds[:, 0]
 
+  accuracy = accuracy_score(model.predict(error[:, feature_rows]), error[:, proxy_i])
+  print("Large sample classifier accuracy: {:.3f}".format(accuracy))
   calculate_model_error_rate(experiment_data, error_truth, error_proxy, full_dim, influence_vars, proxy_i, proxy_var, columns)
 
 
@@ -934,7 +935,7 @@ def main(method = None, influencers = None, cdim = None):
   parser = argparse.ArgumentParser()
   parser.add_argument("--logn_examples", type=float, default = 4, help="how many examples (log 10)")
 
-  parser.add_argument("--logn_error_rate", type = float, default = 3)
+  parser.add_argument("--logn_error_rate", type = float, default = 4)
 
   parser.add_argument("--k", type=int, default=4, help="how many runs for each?")
   parser.add_argument("--dataset", type=str, default='synthetic')
@@ -959,8 +960,8 @@ def main(method = None, influencers = None, cdim = None):
                       help="dimensionality of c")
   parser.add_argument("--u_dim", type=int, default=1,
                       help="dimensionality of u")
-  parser.add_argument("--dist_seed", type=int, default=5)
-  parser.add_argument("--exp_seed", type=int, default=5)
+  parser.add_argument("--dist_seed", type=int, default=6)
+  parser.add_argument("--exp_seed", type=int, default=6)
   parser.add_argument("--write", type=str, default='append')
   parser.add_argument("--debug", action='store_true')
   parser.add_argument("--nondiff", action='store_true')
@@ -1105,7 +1106,7 @@ def main(method = None, influencers = None, cdim = None):
   return [means.get('min', np.nan_to_num), stds.get('min', np.nan), np.mean(np.array(classifier_rates)), experiment_data]
 
 if __name__ == "__main__":
-  influencer = 'a,y,c0'
+  influencer = 'a,y,c0,c1,c2,c3,c4'
 
   influence_size = []
   error_matrix_data = []
@@ -1167,7 +1168,7 @@ if __name__ == "__main__":
   
 
 
-  for i in range(1, 2):
+  for i in range(5, 10):
     matrix_list = main(influencers = influencer, cdim = i)
     model_list = main(method = "new", influencers = influencer, cdim = i)
     error_matrix_data.append(abs(matrix_list[0]))
@@ -1180,13 +1181,10 @@ if __name__ == "__main__":
     model_experiment = model_list[3]
     matrix_experiment = matrix_list[3]
 
-    print(matrix_experiment.true_err)
-    print(matrix_experiment.err_matrix.dict)
-
     matrix_true_errs = [matrix_experiment.true_err[key] for key in matrix_experiment.err_matrix.dict]
     matrix_pred_errs = [matrix_experiment.err_matrix.dict[key] for key in matrix_experiment.err_matrix.dict]
 
-    matrix_true_errs = np.array(matrix_true_errs)
+    matrix_true_errs = np.array(matrix_true_errs).flatten()
     matrix_pred_errs = np.array(matrix_pred_errs).flatten()
 
 
@@ -1194,7 +1192,7 @@ if __name__ == "__main__":
     model_pred_errs = []
 
     for assn in model_experiment.p_dot.keys():
-      model_pred_errs.append(model_experiment.model.predict_proba(np.array(assn).reshape(1, -1))[0][1])
+      model_pred_errs.append(1 - model_experiment.model.predict_proba(np.array(assn).reshape(1, -1))[0][1])
 
     print("Matrix true mean: {:.3f}".format(np.mean(matrix_true_errs)))
     print("Matrix predicted mean: {:.3f}".format(np.mean(matrix_pred_errs)))
@@ -1206,16 +1204,14 @@ if __name__ == "__main__":
     print("Model true variance {:.3f}".format(np.var(np.array(model_true_errs))))
     print("Model predicted variance {:3f}".format(np.var(np.array(model_pred_errs))))
 
-    print(len(list(matrix_experiment.p_dot.values())), len(abs(matrix_pred_errs - matrix_true_errs)))
-    print(len(list(model_experiment.p_dot.values())), len(abs(np.array(model_pred_errs) - np.array(model_true_errs))))
     fig2 = plt.figure()
-    plt.scatter(list(matrix_experiment.p_dot.values()), abs(matrix_pred_errs - matrix_true_errs), label = "Error matrix")
-    plt.scatter(list(model_experiment.p_dot.values()), abs(np.array(model_pred_errs) - np.array(model_true_errs)), label = "Model")
+    plt.scatter(list(matrix_experiment.p_dot.values()), abs(matrix_pred_errs - matrix_true_errs), alpha = .5, label = "Error matrix")
+    plt.scatter(list(model_experiment.p_dot.values()), abs(np.array(model_pred_errs).flatten() - np.array(model_true_errs).flatten()), alpha = .5, label = "Model")
     plt.legend()
     plt.title("Matrix error rates versus probability distribution of assignment")
     plt.xlabel("Probability of assignment")
     plt.ylabel("Error rate of assignment")
-    plt.show()
+    # plt.show()
 
   fig1 = plt.figure()
   plt.plot(influence_size, error_matrix_data, color = 'red', label = 'Error matrix data')
