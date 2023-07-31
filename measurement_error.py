@@ -104,7 +104,7 @@ def get_fractional_error_rate(proxy, truth, truth_val, sample=False,
   true = np.sum(true_where)
 
   if true > 0:
-    diff = 1 - truth[true_where].astype(np.float64) - proxy[true_where]
+    diff = truth[true_where].astype(np.float64) - proxy[true_where]
     err = np.sum(np.absolute(diff))
     err_rate = err / true
   else:
