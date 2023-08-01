@@ -289,7 +289,7 @@ def train_error_model(experiment_data, proxy_arr, truth_arr, proxy_var, columns,
   else:
     influences = truth_arr.reshape(-1, 1)
 
-  model = LogisticRegression()
+  model = RandomForestClassifier()
   model.fit(influences, label_list)
 
   # experiment_data.set_model_coef(model.coef_)
@@ -394,7 +394,7 @@ def calculate_model_error_rate(experiment_data, error_truth, error_proxy, full_d
     truth_val = assn[proxy_i]
     proxy_val = 1 - truth_val
     confound_assn = tuple(assn[i] for i in indices)
-    errs[assn] = get_fractional_error_rate(proxy_col, truth_arr, proxy_val, confounds=confounds, confound_assn=confound_assn)
+    errs[assn] = get_error_rate(proxy_col, truth_arr, proxy_val, confounds=confounds, confound_assn=confound_assn)
 
   experiment_data.true_err = errs
 
@@ -433,64 +433,64 @@ def impute_and_correct_with_model(experiment_data, train, test, error, columns, 
 
   # true_dev = train_features[num_train:, :]
   # dev_preds = model.predict_proba(true_dev)
-  dev_preds = model.predict_proba(train[num_train:, feature_rows])
+  dev_preds = model.predict(train[num_train:, feature_rows])
   dev_truth = train[num_train:, :full_dim]
   true_dev_proxy = train[num_train:, :full_dim].copy().astype(np.float64)
-  true_dev_proxy_dist = get_fractional_dist(true_dev_proxy, columns, proxy_var)
+  true_dev_proxy_dist = get_dist(true_dev_proxy, columns, proxy_var)
 
   experiment_data.set_p_dot(true_dev_proxy_dist.dict)
 
-  true_dev_proxy[:, proxy_i] = dev_preds[:, 0]
+  # true_dev_proxy[:, proxy_i] = dev_preds
 
-  # dev_proxy_dist, true_errs = construct_proxy_dist(true_dev_proxy_dist, .45, proxy_var, .005, nondiff = False)
+  dev_proxy_dist, true_errs = construct_proxy_dist(true_dev_proxy_dist, .3, proxy_var, .01, nondiff = False)
 
-  # new_data_array = np.copy(true_dev_proxy) 
+  new_data_array = np.copy(true_dev_proxy) 
 
 
-  # for i in range(true_dev_proxy.shape[0]):
-  #   combination = tuple(true_dev_proxy[i])
-  #   error_prob = true_errs.dict.get(combination, 0.0)
-  #   if random.random() < error_prob:
-  #     new_data_array[i, proxy_i] = 1 - true_dev_proxy[i, proxy_i]
+  for i in range(true_dev_proxy.shape[0]):
+    combination = tuple(true_dev_proxy[i])
+    error_prob = true_errs.dict.get(combination, 0.0)
+    if random.random() < error_prob:
+      new_data_array[i, proxy_i] = 1 - true_dev_proxy[i, proxy_i]
 
-  # true_dev_proxy = new_data_array
+  true_dev_proxy = new_data_array
 
-  train_accuracy = accuracy_score(model.predict(train[num_train:, feature_rows]), train[num_train:, proxy_i])
+  train_accuracy = accuracy_score(true_dev_proxy[:, proxy_i], train[num_train:, proxy_i])
   print("Train set classifier accuracy: {:.3f}".format(train_accuracy))
   # import pdb; pdb.set_trace()
 
   # test_features = np.concatenate((test[:, :proxy_i], test[:, 1 + proxy_i:]),
   #                                axis=1)
   # test_preds = model.predict_proba(test_features)
-  test_preds = model.predict_proba(test[:, feature_rows])
+  test_preds = model.predict(test[:, feature_rows])
   test_proxy = test[:, :full_dim].copy().astype(np.float64)
-  test_proxy[:, proxy_i] = test_preds[:, 0]
+  # test_proxy[:, proxy_i] = test_preds
 
-  # experiment_data.true_err = true_errs
+  experiment_data.true_err = true_errs.dict
 
-  # new_data_array = np.copy(test_proxy) 
+  new_data_array = np.copy(test_proxy) 
 
 
-  # for i in range(test_proxy.shape[0]):
-  #   combination = tuple(test_proxy[i])
-  #   error_prob = true_errs.dict.get(combination, 0.0)
-  #   if random.random() < error_prob:
-  #     new_data_array[i, proxy_i] = 1 - test_proxy[i, proxy_i]
+  for i in range(test_proxy.shape[0]):
+    combination = tuple(test_proxy[i])
+    error_prob = true_errs.dict.get(combination, 0.0)
+    if random.random() < error_prob:
+      new_data_array[i, proxy_i] = 1 - test_proxy[i, proxy_i]
 
-  # test_proxy = new_data_array
-  true_test_proxy_dist = get_fractional_dist(test_proxy, columns, proxy_var)
+  test_proxy = new_data_array
+  true_test_proxy_dist = get_dist(test_proxy, columns, proxy_var)
 
-  accuracy = accuracy_score(model.predict(test[:, feature_rows]), test[:, proxy_i])
+  accuracy = accuracy_score(test_proxy[:, proxy_i], test[:, proxy_i])
   print("Test set classifier accuracy: {:.3f}".format(accuracy))
 
-  error_preds = model.predict_proba(error[:, feature_rows])
-  error_truth = error[:, :full_dim].copy().astype(np.float64)
-  error_proxy = error[:, :full_dim].copy().astype(np.float64)
-  error_proxy[:, proxy_i] = error_preds[:, 0]
+  # error_preds = model.predict(error[:, feature_rows])
+  # error_truth = error[:, :full_dim].copy().astype(np.float64)
+  # error_proxy = error[:, :full_dim].copy().astype(np.float64)
+  # error_proxy[:, proxy_i] = error_preds
 
-  accuracy = accuracy_score(model.predict(error[:, feature_rows]), error[:, proxy_i])
-  print("Large sample classifier accuracy: {:.3f}".format(accuracy))
-  calculate_model_error_rate(experiment_data, error_truth, error_proxy, full_dim, influence_vars, proxy_i, proxy_var, columns)
+  # accuracy = accuracy_score(model.predict(error[:, feature_rows]), error[:, proxy_i])
+  # print("Large sample classifier accuracy: {:.3f}".format(accuracy))
+  # calculate_model_error_rate(experiment_data, error_truth, error_proxy, full_dim, influence_vars, proxy_i, proxy_var, columns)
 
 
 
@@ -587,63 +587,64 @@ def fractional_impute_and_correct(experiment_data, train, test, error, columns, 
 
   # true_dev = train_features[num_train:, :]
   # dev_preds = model.predict_proba(true_dev)
-  dev_preds = model.predict_proba(train[num_train:, feature_rows])
+  dev_preds = model.predict(train[num_train:, feature_rows])
   dev_truth = train[num_train:, :full_dim]
   true_dev_proxy = train[num_train:, :full_dim].copy().astype(np.float64)
 
-  true_dev_proxy_dist = get_fractional_dist(true_dev_proxy, columns, proxy_var)
+  true_dev_proxy_dist = get_dist(true_dev_proxy, columns, proxy_var)
   experiment_data.set_p_dot(true_dev_proxy_dist.dict)
 
-  true_dev_proxy[:, proxy_i] = dev_preds[:, 0]
+  # true_dev_proxy[:, proxy_i] = dev_preds
 
 
-  # dev_proxy_dist, true_errs = construct_proxy_dist(true_dev_proxy_dist, .45, proxy_var, .005, nondiff = False)
+  dev_proxy_dist, true_errs = construct_proxy_dist(true_dev_proxy_dist, .3, proxy_var, .01, nondiff = False)
 
-  # new_data_array = np.copy(true_dev_proxy)  
+  new_data_array = np.copy(true_dev_proxy)  
+
+  for i in range(true_dev_proxy.shape[0]):
+    combination = tuple(true_dev_proxy[i])
+    error_prob = true_errs.dict.get(combination, 0.0) 
+    if random.random() < error_prob:
+      new_data_array[i, proxy_i] = 1 - true_dev_proxy[i, proxy_i]
 
 
-  # for i in range(true_dev_proxy.shape[0]):
-  #   combination = tuple(true_dev_proxy[i])
-  #   error_prob = true_errs.dict.get(combination, 0.0) 
-  #   if random.random() < error_prob:
-  #     new_data_array[i, proxy_i] = 1 - true_dev_proxy[i, proxy_i]
-
-
-  # true_dev_proxy = new_data_array
-  train_accuracy = (accuracy_score(model.predict(train[num_train:, feature_rows]), train[num_train:, proxy_i]))
+  true_dev_proxy = new_data_array
+  print('hello')
+  train_accuracy = accuracy_score(true_dev_proxy[:, proxy_i], train[num_train:, proxy_i])
+  print('hello')
   print("train set classifier accuracy: {:.3f}".format(train_accuracy))
   # test_features = np.concatenate((test[:, :proxy_i], test[:, 1 + proxy_i:])
   #                                axis=1)
   # test_preds = model.predict_proba(test_features)
-  test_preds = model.predict_proba(test[:, feature_rows])
+  test_preds = model.predict(test[:, feature_rows])
   test_proxy = test[:, :full_dim].copy().astype(np.float64)
-  test_proxy[:, proxy_i] = test_preds[:, 0]
+  test_proxy[:, proxy_i] = test_preds
 
-  # experiment_data.true_err = true_errs
+  experiment_data.true_err = true_errs.dict
 
-  # new_data_array = np.copy(test_proxy)  # Make a copy to store modified data
+  new_data_array = np.copy(test_proxy)  # Make a copy to store modified data
 
 
-  # for i in range(test_proxy.shape[0]):
-  #   combination = tuple(test_proxy[i])
-  #   error_prob = true_errs.dict.get(combination, 0.0)  # Get the error probability, defaulting to 0 if not found
-  #   if random.random() < error_prob:
-  #     # If the random number is less than the error probability, switch U to the opposite value
-  #     new_data_array[i, proxy_i] = 1 - test_proxy[i, proxy_i]
+  for i in range(test_proxy.shape[0]):
+    combination = tuple(test_proxy[i])
+    error_prob = true_errs.dict.get(combination, 0.0) 
+    if random.random() < error_prob:
+      new_data_array[i, proxy_i] = 1 - test_proxy[i, proxy_i]
 
-  # test_proxy = new_data_array
-  accuracy = accuracy_score(model.predict(test[:, feature_rows]), test[:, proxy_i])
+  test_proxy = new_data_array
+
+  accuracy = accuracy_score(test_proxy[:, proxy_i], test[:, proxy_i])
   print("test set classifier accuracy: {:.3f}".format(accuracy))
   true_dist = get_fractional_dist(train[num_train:, :full_dim].copy().astype(np.float64), columns, proxy_var)
 
-  error_preds = model.predict_proba(error[:, feature_rows])
-  error_truth = error[:, :full_dim].copy().astype(np.float64)
-  error_proxy = error[:, :full_dim].copy().astype(np.float64)
-  error_proxy[:, proxy_i] = error_preds[:, 0]
+  # error_preds = model.predict(error[:, feature_rows])
+  # error_truth = error[:, :full_dim].copy().astype(np.float64)
+  # error_proxy = error[:, :full_dim].copy().astype(np.float64)
+  # error_proxy[:, proxy_i] = error_preds
 
-  accuracy = accuracy_score(model.predict(error[:, feature_rows]), error[:, proxy_i])
-  print("Large sample classifier accuracy: {:.3f}".format(accuracy))
-  calculate_model_error_rate(experiment_data, error_truth, error_proxy, full_dim, influence_vars, proxy_i, proxy_var, columns)
+  # accuracy = accuracy_score(model.predict(error[:, feature_rows]), error[:, proxy_i])
+  # print("Large sample classifier accuracy: {:.3f}".format(accuracy))
+  # calculate_model_error_rate(experiment_data, error_truth, error_proxy, full_dim, influence_vars, proxy_i, proxy_var, columns)
 
 
   new_dists = []
@@ -671,7 +672,7 @@ def fractional_impute_and_correct(experiment_data, train, test, error, columns, 
       print("test_err:", {key: round(val[0], 3)
                           for key, val in test_err.dict.items()})
 
-    proxy_dist = get_fractional_dist(test_proxy, columns, proxy_var)
+    proxy_dist = get_dist(test_proxy, columns, proxy_var)
     dists = correct(proxy_dist, proxy_var, err_ranges,
                     nondiff=nondiff, sample_err_rates=sample_err_rates,
                     debug=debug)
@@ -1106,7 +1107,7 @@ def main(method = None, influencers = None, cdim = None):
   return [means.get('min', np.nan_to_num), stds.get('min', np.nan), np.mean(np.array(classifier_rates)), experiment_data]
 
 if __name__ == "__main__":
-  influencer = 'a,y,c0,c1,c2,c3,c4'
+  influencer = 'a,y,c0,c1,c2,c3,c4,c5'
 
   influence_size = []
   error_matrix_data = []
@@ -1168,7 +1169,7 @@ if __name__ == "__main__":
   
 
 
-  for i in range(5, 10):
+  for i in range(6, 8):
     matrix_list = main(influencers = influencer, cdim = i)
     model_list = main(method = "new", influencers = influencer, cdim = i)
     error_matrix_data.append(abs(matrix_list[0]))
@@ -1192,7 +1193,12 @@ if __name__ == "__main__":
     model_pred_errs = []
 
     for assn in model_experiment.p_dot.keys():
-      model_pred_errs.append(1 - model_experiment.model.predict_proba(np.array(assn).reshape(1, -1))[0][1])
+      model_pred_errs.append(model_experiment.model.predict_proba(np.array(assn).reshape(1, -1))[0][1])
+
+    print(matrix_true_errs[0:10])
+    print(matrix_pred_errs[0:10])
+    print(np.array(model_true_errs[0:10]))
+    print(np.array(model_pred_errs[0:10]))
 
     print("Matrix true mean: {:.3f}".format(np.mean(matrix_true_errs)))
     print("Matrix predicted mean: {:.3f}".format(np.mean(matrix_pred_errs)))
