@@ -618,7 +618,7 @@ def fractional_impute_and_correct(experiment_data, train, test, error, columns, 
   # test_preds = model.predict_proba(test_features)
   test_preds = model.predict(test[:, feature_rows])
   test_proxy = test[:, :full_dim].copy().astype(np.float64)
-  test_proxy[:, proxy_i] = test_preds
+  # test_proxy[:, proxy_i] = test_preds
 
   experiment_data.true_err = true_errs.dict
 
@@ -1107,7 +1107,7 @@ def main(method = None, influencers = None, cdim = None):
   return [means.get('min', np.nan_to_num), stds.get('min', np.nan), np.mean(np.array(classifier_rates)), experiment_data]
 
 if __name__ == "__main__":
-  influencer = 'a,y,c0,c1,c2,c3,c4,c5'
+  influencer = 'a,y,c0'
 
   influence_size = []
   error_matrix_data = []
@@ -1169,7 +1169,7 @@ if __name__ == "__main__":
   
 
 
-  for i in range(6, 8):
+  for i in range(1, 10):
     matrix_list = main(influencers = influencer, cdim = i)
     model_list = main(method = "new", influencers = influencer, cdim = i)
     error_matrix_data.append(abs(matrix_list[0]))
@@ -1195,10 +1195,31 @@ if __name__ == "__main__":
     for assn in model_experiment.p_dot.keys():
       model_pred_errs.append(model_experiment.model.predict_proba(np.array(assn).reshape(1, -1))[0][1])
 
-    print(matrix_true_errs[0:10])
-    print(matrix_pred_errs[0:10])
-    print(np.array(model_true_errs[0:10]))
-    print(np.array(model_pred_errs[0:10]))
+    p_dot = model_experiment.p_dot
+    keys = sorted(p_dot.keys(), key=lambda key: p_dot[key], reverse=True)
+    smallest_keys = keys[len(keys) - 10: len(keys)]
+    biggest_keys = keys[:10]
+    for key in biggest_keys:
+      print('-------------------------------------')
+      print(matrix_experiment.err_matrix.dict[key])
+      print(model_experiment.model.predict_proba(np.array(key).reshape(1, -1))[0][1])
+      print(matrix_experiment.true_err[key])
+
+    print('#########################################')
+    for key in smallest_keys:
+      print('-------------------------------------')
+      print(matrix_experiment.err_matrix.dict[key])
+      print(model_experiment.model.predict_proba(np.array(key).reshape(1, -1))[0][1])
+      print(matrix_experiment.true_err[key])
+    # print(biggest_keys)
+    # print("Matrix predicted errors: {}".format(matrix_pred_errs[biggest_keys]))
+    # print("Model predicted errors: {}".format(model_pred_errs[biggest_keys]))
+    # print("True errors: {}".format(matrix_true_errs[biggest_keys]))
+
+    # print(matrix_true_errs[0:10])
+    # print(matrix_pred_errs[0:10])
+    # print(np.array(model_true_errs[0:10]))
+    # print(np.array(model_pred_errs[0:10]))
 
     print("Matrix true mean: {:.3f}".format(np.mean(matrix_true_errs)))
     print("Matrix predicted mean: {:.3f}".format(np.mean(matrix_pred_errs)))
