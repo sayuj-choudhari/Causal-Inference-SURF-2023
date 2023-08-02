@@ -21,6 +21,7 @@ from datasets import SyntheticData
 from utils import Distribution, gformula, NumpySerializer
 from utils import get_dist, get_fractional_dist
 from utils import construct_proxy_dist
+from utils import construct_model_proxy_dist
 from sensitivity import clopper_pearson_interval
 
 from line_profiler import LineProfiler
@@ -442,14 +443,14 @@ def impute_and_correct_with_model(experiment_data, train, test, error, columns, 
 
   # true_dev_proxy[:, proxy_i] = dev_preds
 
-  dev_proxy_dist, true_errs = construct_proxy_dist(true_dev_proxy_dist, .3, proxy_var, .01, nondiff = False)
+  dev_proxy_dist, true_errs = construct_model_proxy_dist(true_dev_proxy_dist, .3, proxy_var, .01, nondiff = True)
 
   new_data_array = np.copy(true_dev_proxy) 
 
 
   for i in range(true_dev_proxy.shape[0]):
     combination = tuple(true_dev_proxy[i])
-    error_prob = true_errs.dict.get(combination, 0.0)
+    error_prob = true_errs.get(combination, 0.0)
     if random.random() < error_prob:
       new_data_array[i, proxy_i] = 1 - true_dev_proxy[i, proxy_i]
 
@@ -466,14 +467,14 @@ def impute_and_correct_with_model(experiment_data, train, test, error, columns, 
   test_proxy = test[:, :full_dim].copy().astype(np.float64)
   # test_proxy[:, proxy_i] = test_preds
 
-  experiment_data.true_err = true_errs.dict
+  experiment_data.true_err = true_errs
 
   new_data_array = np.copy(test_proxy) 
 
 
   for i in range(test_proxy.shape[0]):
     combination = tuple(test_proxy[i])
-    error_prob = true_errs.dict.get(combination, 0.0)
+    error_prob = true_errs.get(combination, 0.0)
     if random.random() < error_prob:
       new_data_array[i, proxy_i] = 1 - test_proxy[i, proxy_i]
 
@@ -597,21 +598,19 @@ def fractional_impute_and_correct(experiment_data, train, test, error, columns, 
   # true_dev_proxy[:, proxy_i] = dev_preds
 
 
-  dev_proxy_dist, true_errs = construct_proxy_dist(true_dev_proxy_dist, .3, proxy_var, .01, nondiff = False)
+  dev_proxy_dist, true_errs = construct_model_proxy_dist(true_dev_proxy_dist, .3, proxy_var, .01, nondiff = True)
 
   new_data_array = np.copy(true_dev_proxy)  
 
   for i in range(true_dev_proxy.shape[0]):
     combination = tuple(true_dev_proxy[i])
-    error_prob = true_errs.dict.get(combination, 0.0) 
+    error_prob = true_errs.get(combination, 0.0) 
     if random.random() < error_prob:
       new_data_array[i, proxy_i] = 1 - true_dev_proxy[i, proxy_i]
 
 
   true_dev_proxy = new_data_array
-  print('hello')
   train_accuracy = accuracy_score(true_dev_proxy[:, proxy_i], train[num_train:, proxy_i])
-  print('hello')
   print("train set classifier accuracy: {:.3f}".format(train_accuracy))
   # test_features = np.concatenate((test[:, :proxy_i], test[:, 1 + proxy_i:])
   #                                axis=1)
@@ -620,14 +619,14 @@ def fractional_impute_and_correct(experiment_data, train, test, error, columns, 
   test_proxy = test[:, :full_dim].copy().astype(np.float64)
   # test_proxy[:, proxy_i] = test_preds
 
-  experiment_data.true_err = true_errs.dict
+  experiment_data.true_err = true_errs
 
   new_data_array = np.copy(test_proxy)  # Make a copy to store modified data
 
 
   for i in range(test_proxy.shape[0]):
     combination = tuple(test_proxy[i])
-    error_prob = true_errs.dict.get(combination, 0.0) 
+    error_prob = true_errs.get(combination, 0.0) 
     if random.random() < error_prob:
       new_data_array[i, proxy_i] = 1 - test_proxy[i, proxy_i]
 
