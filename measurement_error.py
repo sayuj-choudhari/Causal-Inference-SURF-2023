@@ -290,7 +290,7 @@ def train_error_model(experiment_data, proxy_arr, truth_arr, proxy_var, columns,
   else:
     influences = truth_arr.reshape(-1, 1)
 
-  model = RandomForestClassifier()
+  model = LogisticRegression()
   model.fit(influences, label_list)
 
   # experiment_data.set_model_coef(model.coef_)
@@ -1105,6 +1105,31 @@ def main(method = None, influencers = None, cdim = None):
 
   return [means.get('min', np.nan_to_num), stds.get('min', np.nan), np.mean(np.array(classifier_rates)), experiment_data]
 
+def print_results(model_experiment, matrix_experiment, list_keys):
+  matrix_diff = []
+  model_diff = []
+
+  for key in list_keys:
+    print('-------------------------------------')
+    print("Matrix predicted error: {}".format(matrix_experiment.err_matrix.dict[key][0]))
+    print("Model predicted error: {}".format(model_experiment.model.predict_proba(np.array(key).reshape(1, -1))[0][1]))
+    print("True error: {}".format(matrix_experiment.true_err[key]))
+    diff1 = abs(matrix_experiment.err_matrix.dict[key][0] - matrix_experiment.true_err[key])
+    diff2 = abs(model_experiment.model.predict_proba(np.array(key).reshape(1, -1))[0][1] - matrix_experiment.true_err[key])
+
+    matrix_diff.append(diff1)
+    model_diff.append(diff2)
+
+
+    print("Matrix difference from truth: {}".format(diff1))
+    print("Model difference from truth: {}".format(diff2))
+
+  print("+++++++++++++++++++++++++++++++++++++++++++")
+  print("Average matrix difference: {}".format(mean(matrix_diff)))
+  print("Average model difference: {}".format(mean(model_diff)))
+  print('#########################################')
+
+
 if __name__ == "__main__":
   influencer = 'a,y,c0'
 
@@ -1115,60 +1140,7 @@ if __name__ == "__main__":
   model_std = []
   classifier_rates = []
 
-  # for i in range(3, 4):
-  #   matrix_list = main(influencers = influencer, cdim = i)
-  #   model_list = main(method = "new", influencers = influencer, cdim = i)
-
-  #   model_experiment = model_list[3]
-  #   matrix_experiment = matrix_list[3]
-
-  #   # print(matrix_experiment.true_err.dict.values())
-  #   # print(matrix_experiment.err_matrix.dict.values())
-
-  #   matrix_true_errs = [matrix_experiment.true_err.dict[key] for key in matrix_experiment.err_matrix.dict]
-  #   matrix_pred_errs = [matrix_experiment.err_matrix.dict[key] for key in matrix_experiment.err_matrix.dict]
-
-  #   matrix_true_errs = np.array(matrix_true_errs)
-  #   matrix_pred_errs = np.array(matrix_pred_errs).flatten()
-
-  #   model_true_errs = [model_experiment.true_err.dict[key] for key in matrix_experiment.err_matrix.dict]
-  #   model_pred_errs = []
-
-  #   for assn in model_experiment.p_dot.keys():
-  #     model_pred_errs.append(model_experiment.model.predict_proba(np.array(assn).reshape(1, -1))[0][1])
-
-  #   print("Matrix true mean: {:.3f}".format(np.mean(matrix_true_errs)))
-  #   print("Matrix predicted mean: {:.3f}".format(np.mean(matrix_pred_errs)))
-  #   print("Model true mean: {:.3f}".format(np.mean(np.array(model_true_errs))))
-  #   print("Model predicted mean: {:.3f}".format(np.mean(np.array(model_pred_errs))))
-
-  #   print("Matrix true variance: {:.3f}".format(np.var(matrix_true_errs)))
-  #   print("Matrix predicted variance: {:.3f}".format(np.var(matrix_pred_errs)))
-  #   print("Model true variance {:.3f}".format(np.var(np.array(model_true_errs))))
-  #   print("Model predicted variance {:3f}".format(np.var(np.array(model_pred_errs))))
-
-
-    
-
-
-  #   # absolute_differences = [abs(((1.0,) * len(matrix_experiment.err_matrix.dict) - (matrix_experiment.err_matrix.dict[key])) 
-  #   #                             - (matrix_experiment.true_err.dict[key])) for key in matrix_experiment.err_matrix.dict]
-
-
-  #   #to_plot = dict(zip(matrix_experiment.p_dot.values(), np.array(list(matrix_experiment.err_matrix.dict.values())) - np.array(list(matrix_experiment.true_err.dict.values()))))
-
-  #   fig2 = plt.figure()
-  #   plt.scatter(list(matrix_experiment.p_dot.values()), abs(matrix_pred_errs - matrix_true_errs), label = "Error matrix")
-  #   plt.scatter(list(model_experiment.p_dot.values()), abs(np.array(model_pred_errs) - np.array(model_true_errs)), label = "Model")
-  #   plt.title("Matrix error rates versus probability distribution of assignment")
-  #   plt.xlabel("Probability of assignment")
-  #   plt.ylabel("Error rate of assignment")
-  #   plt.show()
-
-  
-
-
-  for i in range(1, 10):
+  for i in range(1, 8):
     matrix_list = main(influencers = influencer, cdim = i)
     model_list = main(method = "new", influencers = influencer, cdim = i)
     error_matrix_data.append(abs(matrix_list[0]))
@@ -1198,27 +1170,9 @@ if __name__ == "__main__":
     keys = sorted(p_dot.keys(), key=lambda key: p_dot[key], reverse=True)
     smallest_keys = keys[len(keys) - 10: len(keys)]
     biggest_keys = keys[:10]
-    for key in biggest_keys:
-      print('-------------------------------------')
-      print(matrix_experiment.err_matrix.dict[key])
-      print(model_experiment.model.predict_proba(np.array(key).reshape(1, -1))[0][1])
-      print(matrix_experiment.true_err[key])
 
-    print('#########################################')
-    for key in smallest_keys:
-      print('-------------------------------------')
-      print(matrix_experiment.err_matrix.dict[key])
-      print(model_experiment.model.predict_proba(np.array(key).reshape(1, -1))[0][1])
-      print(matrix_experiment.true_err[key])
-    # print(biggest_keys)
-    # print("Matrix predicted errors: {}".format(matrix_pred_errs[biggest_keys]))
-    # print("Model predicted errors: {}".format(model_pred_errs[biggest_keys]))
-    # print("True errors: {}".format(matrix_true_errs[biggest_keys]))
-
-    # print(matrix_true_errs[0:10])
-    # print(matrix_pred_errs[0:10])
-    # print(np.array(model_true_errs[0:10]))
-    # print(np.array(model_pred_errs[0:10]))
+    print_results(model_experiment, matrix_experiment, biggest_keys)
+    print_results(model_experiment, matrix_experiment, smallest_keys)
 
     print("Matrix true mean: {:.3f}".format(np.mean(matrix_true_errs)))
     print("Matrix predicted mean: {:.3f}".format(np.mean(matrix_pred_errs)))
