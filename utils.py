@@ -56,6 +56,7 @@ def get_fractional_dist(proxy_arr, columns, proxy_var, debug=False):
 
   return Distribution(data=dict(d), columns=columns)
 
+
 def construct_model_proxy_dist(test_dist, classifier_error,
                                proxy_var, spec_var, nondiff=True):
 
@@ -83,6 +84,7 @@ def construct_model_proxy_dist(test_dist, classifier_error,
     true_errs = dict(zip(key_list, adjusted_errs))
 
     return None, true_errs
+
 
 def construct_proxy_dist(test_dist, classifier_error,
                          proxy_var, spec_var, nondiff=False):
@@ -176,37 +178,6 @@ def construct_proxy_dist(test_dist, classifier_error,
   true_errs = Distribution(data=true_errs, columns=test_dist.columns,
                            normalized=False)
   return proxy_dist, true_errs
-
-
-def construct_model_proxy_dist(test_dist, classifier_error,
-                               proxy_var, spec_var, nondiff=True):
-
-    assert nondiff
-
-    full_dim = len(test_dist.columns)
-    proxy_i = test_dist.columns.index(proxy_var)
-
-    true_errs = {}
-
-    coef = np.random.uniform(-2, 2, full_dim)
-
-    for assn in itertools.product(*[range(2) for _ in range(full_dim)]):
-        true_errs[assn] = np.array(assn).dot(coef)
-
-    errs = list(true_errs.values())
-    key_list = list(true_errs.keys())
-
-    adjusted_errs = [np.sqrt(spec_var / np.var(errs)) * element for element in errs]
-    adjusted_errs = adjusted_errs - np.mean(adjusted_errs) + classifier_error
-    adjusted_errs = np.clip(adjusted_errs, 0.01, 0.99)
-
-    # print(f"proxy dist has err mean {np.mean(adjusted_errs):.3f} and var {np.var(adjusted_errs):.3f}")
-
-    true_errs = dict(zip(key_list, adjusted_errs))
-
-    # TODO can add in computation for proxy_dist
-    return None, true_errs
-
 
 
 class Distribution:
