@@ -7,7 +7,6 @@ import os
 import json
 import argparse
 from collections import OrderedDict, defaultdict
-import random
 from statistics import mean
 from statistics import variance
 
@@ -16,6 +15,7 @@ import sklearn.linear_model
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score
+from sklearn.exceptions import ConvergenceWarning
 
 from datasets import SyntheticData
 from utils import Distribution, gformula, NumpySerializer
@@ -28,6 +28,9 @@ from line_profiler import LineProfiler
 
 import matplotlib.pyplot as plt
 
+import warnings
+# warnings.simplefilter("error")
+warnings.filterwarnings('ignore', category=ConvergenceWarning)
 
 def get_assn(truth_val, confound_assn, proxy_i):
   '''
@@ -324,7 +327,7 @@ def get_regression_corrected_dist(dist, proxy_var, model, influence_vars = None)
     influencers = influence_vars[:]
     influencers.append(proxy_var)
 
-  print(influencers)
+  # print(influencers)
   for non_proxy_assn in itertools.product(*[range(2) for _ in range(full_dim - 1)]):
     non_proxy_assn = dict(zip(non_proxy_columns, non_proxy_assn))
 
@@ -350,7 +353,7 @@ def get_regression_corrected_dist(dist, proxy_var, model, influence_vars = None)
     if err1 + err0 != 1.0:
       corrected1 = (1 - err1) * dist.get(**assn0) - err1 * dist.get(**assn1)
       corrected1 /= (1 - err1 - err0)
-      corrected1 = max(corrected1, 1e-5)
+      corrected1 = np.clip(corrected1, 1e-5, None)
       corrected[tuple_assn1] = corrected1
     else:
       corrected[tuple_assn1] = dist.get(**assn1)
@@ -358,7 +361,7 @@ def get_regression_corrected_dist(dist, proxy_var, model, influence_vars = None)
     if err1 + err0 != 1.0:
       corrected0 = - err0 * dist.get(**assn0) + (1 - err0) * dist.get(**assn1)
       corrected0 /= (1 - err1 - err0)
-      corrected0 = max(corrected0, 1e-5)
+      corrected0 = np.clip(corrected0, 1e-5, None)
       corrected[tuple_assn0] = corrected0
     else:
       corrected[tuple_assn0] = dist.get(**assn1)
@@ -403,7 +406,9 @@ def get_perfect_corrected_dist(experiment_data, dist, proxy_var, influence_vars 
     influencers = influence_vars[:]
     influencers.append(proxy_var)
 
-  print(influencers)
+  assert influencers == dist.columns, f"Influencers != columns: {influencers} != {dist.columns}"
+
+  # print(influencers)
   for non_proxy_assn in itertools.product(*[range(2) for _ in range(full_dim - 1)]):
     non_proxy_assn = dict(zip(non_proxy_columns, non_proxy_assn))
 
@@ -414,30 +419,24 @@ def get_perfect_corrected_dist(experiment_data, dist, proxy_var, influence_vars 
     if influence_vars is not None:
       model_input1 = tuple(assn1[col] for col in influencers)
       model_input0 = tuple(assn0[col] for col in influencers)
-      input = np.array(model_input1).reshape(1, -1)
-      shape = input.shape
-      # import pdb; pdb.set_trace()
-      # print(influence_vars)
-      # print(assn1)
       err1 = experiment_data.true_err[model_input1]
       err0 = experiment_data.true_err[model_input0]
-
 
     if err1 + err0 != 1.0:
       corrected1 = (1 - err1) * dist.get(**assn0) - err1 * dist.get(**assn1)
       corrected1 /= (1 - err1 - err0)
       corrected1 = max(corrected1, 1e-5)
-      corrected[tuple_assn1] = corrected1
+      corrected[tuple_assn0] = corrected1
     else:
-      corrected[tuple_assn1] = dist.get(**assn1)
+      corrected[tuple_assn0] = dist.get(**assn0)
 
     if err1 + err0 != 1.0:
       corrected0 = - err0 * dist.get(**assn0) + (1 - err0) * dist.get(**assn1)
       corrected0 /= (1 - err1 - err0)
       corrected0 = max(corrected0, 1e-5)
-      corrected[tuple_assn0] = corrected0
+      corrected[tuple_assn1] = corrected0
     else:
-      corrected[tuple_assn0] = dist.get(**assn1)
+      corrected[tuple_assn1] = dist.get(**assn1)
 
   # We may need to normalize if we had singularities and had to keep original dist 
   total_weight = np.sum(list(corrected.values()))
@@ -458,8 +457,8 @@ def get_perfect_corrected_dist(experiment_data, dist, proxy_var, influence_vars 
 def correct_with_model(experiment_data, dist, proxy_var, proxy_arr, truth_arr, influence_vars = None):
 
   model = train_error_model(experiment_data, proxy_arr, truth_arr, proxy_var, dist.columns, influence_vars)
-  # return get_regression_corrected_dist(dist, proxy_var, model, influence_vars = influence_vars)
-  return get_perfect_corrected_dist(experiment_data, dist, proxy_var, influence_vars = influence_vars)
+  return get_regression_corrected_dist(dist, proxy_var, model, influence_vars = influence_vars)
+  # return get_perfect_corrected_dist(experiment_data, dist, proxy_var, influence_vars = influence_vars)
 
 def calculate_model_error_rate(experiment_data, error_truth, error_proxy, full_dim, influence_vars, proxy_i, proxy_var, columns):
   errs = {}
@@ -528,13 +527,13 @@ def impute_and_correct_with_model(experiment_data, train, test, error, columns, 
   for i in range(true_dev_proxy.shape[0]):
     combination = tuple(true_dev_proxy[i])
     error_prob = true_errs.get(combination, 0.0)
-    if random.random() < error_prob:
+    if np.random.random() < error_prob:
       new_data_array[i, proxy_i] = 1 - true_dev_proxy[i, proxy_i]
 
   true_dev_proxy = new_data_array
 
   train_accuracy = accuracy_score(true_dev_proxy[:, proxy_i], train[num_train:, proxy_i])
-  print("Train set classifier accuracy: {:.3f}".format(train_accuracy))
+  # print("Train set classifier accuracy: {:.3f}".format(train_accuracy))
   # import pdb; pdb.set_trace()
 
   # test_features = np.concatenate((test[:, :proxy_i], test[:, 1 + proxy_i:]),
@@ -552,14 +551,14 @@ def impute_and_correct_with_model(experiment_data, train, test, error, columns, 
   for i in range(test_proxy.shape[0]):
     combination = tuple(test_proxy[i])
     error_prob = true_errs.get(combination, 0.0)
-    if random.random() < error_prob:
+    if np.random.random() < error_prob:
       new_data_array[i, proxy_i] = 1 - test_proxy[i, proxy_i]
 
   test_proxy = new_data_array
   true_test_proxy_dist = get_dist(test_proxy, columns, proxy_var)
 
   accuracy = accuracy_score(test_proxy[:, proxy_i], test[:, proxy_i])
-  print("Test set classifier accuracy: {:.3f}".format(accuracy))
+  # print("Test set classifier accuracy: {:.3f}".format(accuracy))
 
   # error_preds = model.predict(error[:, feature_rows])
   # error_truth = error[:, :full_dim].copy().astype(np.float64)
@@ -682,13 +681,13 @@ def fractional_impute_and_correct(experiment_data, train, test, error, columns, 
   for i in range(true_dev_proxy.shape[0]):
     combination = tuple(true_dev_proxy[i])
     error_prob = true_errs.get(combination, 0.0) 
-    if random.random() < error_prob:
+    if np.random.random() < error_prob:
       new_data_array[i, proxy_i] = 1 - true_dev_proxy[i, proxy_i]
 
 
   true_dev_proxy = new_data_array
   train_accuracy = accuracy_score(true_dev_proxy[:, proxy_i], train[num_train:, proxy_i])
-  print("train set classifier accuracy: {:.3f}".format(train_accuracy))
+  # print("train set classifier accuracy: {:.3f}".format(train_accuracy))
   # test_features = np.concatenate((test[:, :proxy_i], test[:, 1 + proxy_i:])
   #                                axis=1)
   # test_preds = model.predict_proba(test_features)
@@ -704,13 +703,13 @@ def fractional_impute_and_correct(experiment_data, train, test, error, columns, 
   for i in range(test_proxy.shape[0]):
     combination = tuple(test_proxy[i])
     error_prob = true_errs.get(combination, 0.0) 
-    if random.random() < error_prob:
+    if np.random.random() < error_prob:
       new_data_array[i, proxy_i] = 1 - test_proxy[i, proxy_i]
 
   test_proxy = new_data_array
 
   accuracy = accuracy_score(test_proxy[:, proxy_i], test[:, proxy_i])
-  print("test set classifier accuracy: {:.3f}".format(accuracy))
+  # print("test set classifier accuracy: {:.3f}".format(accuracy))
   true_dist = get_fractional_dist(train[num_train:, :full_dim].copy().astype(np.float64), columns, proxy_var)
 
   # error_preds = model.predict(error[:, feature_rows])
@@ -829,7 +828,7 @@ def synthetic(experiment_data, n_examples, n_train, error_samples, seed=None, **
   ay_effect = kwargs.get('ay_effect', 0.1)
   dist_seed = kwargs.get('dist_seed')
   nondiff_text = ",".join(kwargs.get('influence_vars'))
-  print(nondiff_text)
+  # print(nondiff_text)
   sampler = SyntheticData(c_dim=c_dim, u_dim=u_dim, nondiff_text=nondiff_text,
                           topic_std=0.075,
                           ay_effect=ay_effect, seed=dist_seed)
@@ -931,7 +930,7 @@ def get_results(test_dist, new_dists, extras=None, unknown_truth=False,
   percentile_keys = [*[(100 - w) / 2 for w in interval_widths],
                      *[w + (100 - w) / 2 for w in interval_widths]]
   percentile_vals = np.percentile(corrected_effects, percentile_keys,
-                                  interpolation='nearest')
+                                  method='nearest')
   percentiles = dict(zip(percentile_keys, percentile_vals))
                     
   for p, val in percentiles.items():
@@ -941,8 +940,11 @@ def get_results(test_dist, new_dists, extras=None, unknown_truth=False,
     low = percentiles[(100 - w) / 2]
     high = percentiles[w + (100 - w) / 2]
     d['trunc{}width'.format(w)] = min(1, high) - max(-1, low)
-    truncated_mean = np.mean(corrected_effects[np.where(np.logical_and(
-        low < corrected_effects, corrected_effects < high))])
+    truncated_effects = corrected_effects[np.where(np.logical_and(
+        low < corrected_effects, corrected_effects < high))]
+    if truncated_effects.shape[0] == 0:
+        continue
+    truncated_mean = np.mean(truncated_effects)
     d['trunc{}mean'.format(w)] = truncated_mean - oracle_effect
 
     low_overlap = oracle_effect - low
@@ -1141,30 +1143,36 @@ def main(method = None, influencers = None, cdim = None):
   keysets = [set(res.keys()) for res in raw_results]
   all_keys = set("-".join(sorted(str(key) for key in keyset))
                  for keyset in keysets)
+  if len(keysets) == 0:
+      print("No results")
+      return
   max_keyset = max(keysets)
   percent_max = np.mean([1 if k == max_keyset else 0 for k in keysets])
-  print("We have {} results with {} ({:.1f}% max) keysets from {} tries".format(
-      len(raw_results), len(all_keys), 100 * percent_max, args.k))
+  if len(all_keys) > 1:
+      print("We have {} results with {} ({:.1f}% max) keysets from {} tries".format(
+          len(raw_results), len(all_keys), 100 * percent_max, args.k))
   keys = raw_results[0].keys()
   results = defaultdict(list)
   for result in raw_results:
     if set(result.keys()) == max_keyset:
       for key in max_keyset:
         results[key].append(result[key])
+
   results = {key: np.array(val) for key, val in results.items()}
 
   means = {key: np.mean(result) for key, result in results.items()}
   mean_abs = {key: np.mean(np.abs(result))
                 for key, result in results.items()}
   stds = {key: np.std(result) for key, result in results.items()}
-  print("min/p5/mean/p95/max: {:.5f} {:.5f} {:.5f} {:.5f} {:.5f}".format(
-      means.get('min', np.nan),
-      means.get('p5.0', np.nan), means.get('mean', np.nan),
-      means.get('p95.0', np.nan), means.get('max', np.nan)))
-
-  print("standard deviation: {:.5f}".format(
-    stds.get('min', np.nan)))
-  
+  if means.get('min', np.nan) == means.get('max', np.nan):
+      print("mean_abs/std: {:.5f} {:.5f}".format(
+          mean_abs.get('mean', np.nan), stds.get('mean', np.nan),
+      ))
+  else:
+      print("min/p5/mean/p95/max: {:.5f} {:.5f} {:.5f} {:.5f} {:.5f}".format(
+          means.get('min', np.nan),
+          means.get('p5.0', np.nan), means.get('mean', np.nan),
+          means.get('p95.0', np.nan), means.get('max', np.nan)))
 
   outfn = os.path.join(args.outdir, get_outfn(args))
 
@@ -1180,7 +1188,13 @@ def main(method = None, influencers = None, cdim = None):
       obj['mean_abs_{}'.format(key)] = mean_abs[key]
     outf.write("{}\n".format(json.dumps(obj, cls=NumpySerializer)))
 
-  return [means.get('min', np.nan_to_num), stds.get('min', np.nan), np.mean(np.array(classifier_rates)), experiment_data]
+  mean_rate = np.nan
+  if len(classifier_rates) > 0:
+      mean_rate = np.mean(np.array(classifier_rates))
+
+  # NOTE: if k>1, there's a mean being computed before we aggregate
+  #   so if we want actual absolute error, should use mean_abs.get()
+  return [means.get('mean', np.nan_to_num), stds.get('mean', np.nan), mean_rate, experiment_data]
 
 def print_results(model_experiment, matrix_experiment, list_keys):
   matrix_diff = []
@@ -1209,7 +1223,7 @@ def print_results(model_experiment, matrix_experiment, list_keys):
 
 
 if __name__ == "__main__":
-  influencer = 'a,y,c0,c1,c2,c3,c4,c5'
+  influencer = 'a,y,c0,c1'
 
   influence_size = []
   error_matrix_data = []
@@ -1218,8 +1232,10 @@ if __name__ == "__main__":
   model_std = []
   classifier_rates = []
 
-  for i in range(6, 10):
+  for i in range(2, 3):
+    print("matrix", end=" ")
     matrix_list = main(influencers = influencer, cdim = i)
+    print("model", end=" ")
     model_list = main(method = "new", influencers = influencer, cdim = i)
     error_matrix_data.append(abs(matrix_list[0]))
     error_matrix_std.append(matrix_list[1])
@@ -1250,18 +1266,18 @@ if __name__ == "__main__":
     smallest_keys = keys[len(keys) - 10: len(keys)]
     biggest_keys = keys[:10]
 
-    print_results(model_experiment, matrix_experiment, biggest_keys)
-    print_results(model_experiment, matrix_experiment, smallest_keys)
+    # print_results(model_experiment, matrix_experiment, biggest_keys)
+    # print_results(model_experiment, matrix_experiment, smallest_keys)
 
-    print("Matrix true mean: {:.3f}".format(np.mean(matrix_true_errs)))
-    print("Matrix predicted mean: {:.3f}".format(np.mean(matrix_pred_errs)))
-    print("Model true mean: {:.3f}".format(np.mean(np.array(model_true_errs))))
-    print("Model predicted mean: {:.3f}".format(np.mean(np.array(model_pred_errs))))
+    # print("Matrix true mean: {:.3f}".format(np.mean(matrix_true_errs)))
+    # print("Matrix predicted mean: {:.3f}".format(np.mean(matrix_pred_errs)))
+    # print("Model true mean: {:.3f}".format(np.mean(np.array(model_true_errs))))
+    # print("Model predicted mean: {:.3f}".format(np.mean(np.array(model_pred_errs))))
 
-    print("Matrix true variance: {:.3f}".format(np.var(matrix_true_errs)))
-    print("Matrix predicted variance: {:.3f}".format(np.var(matrix_pred_errs)))
-    print("Model true variance {:.3f}".format(np.var(np.array(model_true_errs))))
-    print("Model predicted variance {:3f}".format(np.var(np.array(model_pred_errs))))
+    # print("Matrix true variance: {:.3f}".format(np.var(matrix_true_errs)))
+    # print("Matrix predicted variance: {:.3f}".format(np.var(matrix_pred_errs)))
+    # print("Model true variance {:.3f}".format(np.var(np.array(model_true_errs))))
+    # print("Model predicted variance {:3f}".format(np.var(np.array(model_pred_errs))))
 
     fig2 = plt.figure()
     plt.scatter(list(matrix_experiment.p_dot.values()), abs(matrix_pred_errs - matrix_true_errs), alpha = .5, label = "Error matrix")
