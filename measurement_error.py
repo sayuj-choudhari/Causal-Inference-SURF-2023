@@ -466,12 +466,13 @@ def get_perfect_corrected_dist(experiment_data, dist, proxy_var, influence_vars=
                            normalized=True)
   return corrected
 
-def correct_with_model(experiment_data, dist, proxy_var, proxy_arr, truth_arr, influence_vars = None):
+def correct_with_model(experiment_data, dist, proxy_var, proxy_arr, truth_arr, influence_vars = None, model_type = None):
 
   model = train_error_model(experiment_data, proxy_arr, truth_arr, proxy_var, dist.columns, influence_vars)
+  if model_type == 'perfect':
+    return get_perfect_corrected_dist(experiment_data, dist, proxy_var, influence_vars=influence_vars, debug_model=None)
+  
   return get_regression_corrected_dist(dist, proxy_var, model, influence_vars = influence_vars)
-
-  # return get_perfect_corrected_dist(experiment_data, dist, proxy_var, influence_vars=influence_vars, debug_model=None)
 
 def calculate_model_error_rate(experiment_data, error_truth, error_proxy, full_dim, influence_vars, proxy_i, proxy_var, columns):
   errs = {}
@@ -493,7 +494,7 @@ def calculate_model_error_rate(experiment_data, error_truth, error_proxy, full_d
 def impute_and_correct_with_model(experiment_data, train, test, error, columns, proxy_var,
                                   train_percent=0.5, c_dim=1, u_dim=1,
                                   sample_err_rates=0, bootstrap=1,
-                                  nondiff=False, alpha=None, debug=False, influence_vars = None):
+                                  nondiff=False, alpha=None, debug=False, influence_vars = None, model_type = None):
   '''
   train: training data
   test: testing data
@@ -581,7 +582,7 @@ def impute_and_correct_with_model(experiment_data, train, test, error, columns, 
   correct_distribution = correct_with_model(
       experiment_data, true_test_proxy_dist, proxy_var,
       true_dev_proxy[:, :full_dim], dev_truth,
-      influence_vars=influence_vars)
+      influence_vars=influence_vars, model_type = model_type)
 
   return [correct_distribution], true_dev_proxy_dist, accuracy
 
@@ -761,7 +762,7 @@ def fractional_impute_and_correct(experiment_data, train, test, error, columns, 
 
 def train_adjust(experiment_data, train, test, error, proxy_var, c_dim=1, u_dim=1,
                  bootstrap=1, sample_err_rates=0, alpha=None,
-                 train_percent=0.5, nondiff=False, debug=False, influence_vars = None, impute_func = None, method_type = None):
+                 train_percent=0.5, nondiff=False, debug=False, influence_vars = None, impute_func = None, method_type = None, model_type = None):
   '''
   Given train and test data, train a logistic regression classifier to
     impute a proxy for the missing variables, then calculate the errors
@@ -774,12 +775,12 @@ def train_adjust(experiment_data, train, test, error, proxy_var, c_dim=1, u_dim=
   test_dist = get_dist(truth, columns)
   oracle_effect = gformula(test_dist)
 
-  if method_type is not None:
+  if method_type == 'model':
     new_dists, proxy, accuracy = impute_func(experiment_data,
         train, test, error, columns, proxy_var,
         c_dim=c_dim, u_dim=u_dim, train_percent=train_percent,
         sample_err_rates=sample_err_rates, bootstrap=bootstrap, nondiff=nondiff,
-        alpha=alpha, debug=debug, influence_vars = influence_vars)
+        alpha=alpha, debug=debug, influence_vars = influence_vars, model_type = model_type)
     return test_dist, new_dists, proxy, accuracy
   else:
     new_dists, proxy = impute_func(experiment_data,
@@ -858,13 +859,14 @@ def synthetic(experiment_data, n_examples, n_train, error_samples, seed=None, **
   influence_vars = kwargs.get('influence_vars')
   impute_func = kwargs.get('impute_func')
   method_type = kwargs.get('method_type')
+  model_type = kwargs.get('model_type')
 
   train = np.concatenate([external, external_t], axis=1)
   test = np.concatenate([truth, truth_t], axis=1)
   error = np.concatenate([error, error_t], axis = 1)
   true_dist = sampler.dist
 
-  if method_type is not None:
+  if method_type == 'model':
     test_dist, new_dists, unc_proxy, accuracy = train_adjust(experiment_data,
         train, test, error, proxy_var,
         c_dim=c_dim, u_dim=u_dim,
@@ -872,7 +874,7 @@ def synthetic(experiment_data, n_examples, n_train, error_samples, seed=None, **
         bootstrap=bootstrap,
         train_percent=train_percent,
         nondiff=nondiff,
-        alpha=alpha, debug=debug, influence_vars = influence_vars, impute_func = impute_func, method_type = method_type)
+        alpha=alpha, debug=debug, influence_vars = influence_vars, impute_func = impute_func, method_type = method_type, model_type = model_type)
   else:
     test_dist, new_dists, unc_proxy = train_adjust(experiment_data,
         train, test, error, proxy_var,
@@ -887,7 +889,7 @@ def synthetic(experiment_data, n_examples, n_train, error_samples, seed=None, **
   if kwargs.get('uncorrected', False):
     return true_dist, [unc_proxy]
 
-  if method_type is not None:
+  if method_type == 'model':
     return true_dist, new_dists, accuracy
   else:
     return true_dist, new_dists
@@ -978,6 +980,14 @@ def get_outfn(args):
   seeds = "-{}-{}-{}".format(args.dist_seed, args.exp_seed, args.k)
   return "{}{}.json".format(base, seeds)
 
+def get_result_dir(args):
+  if args.method_type == 'model':
+    base = "{}_{}_experiment_{}".format(args.model_type, args.method_type, args.logn_examples)
+  else:
+    base = "{}_experiment_{}".format(args.method_type, args.logn_examples)
+  seeds = "-{}-{}".format(args.c_dim, args.k)
+  return "{}{}.json".format(base, seeds)
+
 class Experimental_Data:
   def __init__(self):
       self.model_coef = None
@@ -1012,14 +1022,14 @@ class Experimental_Data:
 
 
 # @profile
-def main(method = None, influencers = None, cdim = None):
+def main():
   # seed, method = None, influencers = None
   parser = argparse.ArgumentParser()
   parser.add_argument("--logn_examples", type=float, default = 4, help="how many examples (log 10)")
 
   parser.add_argument("--logn_error_rate", type = float, default = 4)
 
-  parser.add_argument("--k", type=int, default=4, help="how many runs for each?")
+  parser.add_argument("--k", type=int, default=3, help="how many runs for each?")
   parser.add_argument("--dataset", type=str, default='synthetic')
   parser.add_argument("--min_freq", type=int, default=10,
                       help="min freq for yelp data vocabulary")
@@ -1054,25 +1064,20 @@ def main(method = None, influencers = None, cdim = None):
   parser.add_argument("--influence_vars", type = str, default = None)
 
   parser.add_argument("--method_type", type = str, default = None)
+  parser.add_argument("--model_type", type = str, default = None)
+  parser.add_argument("--results_dir", type = str, default="experiments/")
 
   args = parser.parse_args()
 
   # args.dist_seed = seed
   # args.exp_seed = seed
 
-  if method is not None:
-    args.method_type = "new"
+  influencers = "a,y,"
+  influencers += ",".join([f"c{i}" for i in range(args.c_dim)])
+  args.influence_vars = influencers
+  args.influence_vars = args.influence_vars.split(",")
 
-  if influencers is not None:
-    args.influence_vars = influencers
-
-  if args.influence_vars is not None:
-    args.influence_vars = args.influence_vars.split(",")
-
-  if cdim is not None:
-    args.c_dim = cdim
-
-  if args.method_type is not None:
+  if args.method_type == 'model':
     impute_func = impute_and_correct_with_model
   else:
     impute_func = fractional_impute_and_correct
@@ -1103,7 +1108,7 @@ def main(method = None, influencers = None, cdim = None):
               'dist_seed': args.dist_seed, 'c_dim': args.c_dim,
               'bootstrap': args.bootstrap, 'ay_effect': args.ay_effect,
               'sample_err_rates': args.sample_err_rates, 'nondiff': args.nondiff, 'influence_vars' : args.influence_vars, 'impute_func' : impute_func,
-              'method_type' : args.method_type}
+              'method_type' : args.method_type, 'model_type': args.model_type}
   
   
   if args.dataset == 'synthetic':
@@ -1124,7 +1129,7 @@ def main(method = None, influencers = None, cdim = None):
     if args.debug:
       print(" {} ".format(i), end='\r')
     try:
-      if args.method_type is not None:
+      if args.method_type == 'model':
         truth, estimates, accuracy = test_func(experiment_data, n_examples, n_train, error_samples, seed, **job_args)
         classifier_rates.append(1 - accuracy)
         raw_results.append(get_results(truth, estimates, interval_widths=[90, 95]))
@@ -1182,8 +1187,25 @@ def main(method = None, influencers = None, cdim = None):
           mean_abs.get('mean', np.nan),
           means.get('max', np.nan)))
 
-  outfn = os.path.join(args.outdir, get_outfn(args))
+  # outfn = os.path.join(args.outdir, get_outfn(args))
 
+  # if args.write == 'overwrite':
+  #   mode = 'w'
+  # else:
+  #   mode = 'a'
+  # with open(outfn, mode) as outf:
+  #   obj = vars(args)
+  #   for key in keys:
+  #     obj['mean_{}'.format(key)] = means[key]
+  #     obj['std_{}'.format(key)] = stds[key]
+  #     obj['mean_abs_{}'.format(key)] = mean_abs[key]
+  #   outf.write("{}\n".format(json.dumps(obj, cls=NumpySerializer)))
+
+  mean_rate = np.nan
+  if len(classifier_rates) > 0:
+      mean_rate = np.mean(np.array(classifier_rates))
+
+  outfn = os.path.join(args.results_dir, get_result_dir(args))
   if args.write == 'overwrite':
     mode = 'w'
   else:
@@ -1195,10 +1217,6 @@ def main(method = None, influencers = None, cdim = None):
       obj['std_{}'.format(key)] = stds[key]
       obj['mean_abs_{}'.format(key)] = mean_abs[key]
     outf.write("{}\n".format(json.dumps(obj, cls=NumpySerializer)))
-
-  mean_rate = np.nan
-  if len(classifier_rates) > 0:
-      mean_rate = np.mean(np.array(classifier_rates))
 
   # NOTE: if k>1, there's a mean being computed before we aggregate
   #   so if we want actual absolute error, should use mean_abs.get()
@@ -1220,7 +1238,6 @@ def print_results(model_experiment, matrix_experiment, list_keys):
     matrix_diff.append(diff1)
     model_diff.append(diff2)
 
-
     print("Matrix difference from truth: {}".format(diff1))
     print("Model difference from truth: {}".format(diff2))
 
@@ -1229,9 +1246,10 @@ def print_results(model_experiment, matrix_experiment, list_keys):
   print("Average model difference: {}".format(mean(model_diff)))
   print('#########################################')
 
-
 if __name__ == "__main__":
-  influencer = 'a,y,c0,c1'
+  main()
+
+if __name__ != "__main__":
 
   influence_size = []
   error_matrix_data = []
@@ -1240,7 +1258,7 @@ if __name__ == "__main__":
   model_std = []
   classifier_rates = []
 
-  for c_dim in range(6, 11, 2):
+  for c_dim in range(1, 11, 1):
     influencer = "a,y,"
     influencer += ",".join([f"c{i}" for i in range(c_dim)])
 
