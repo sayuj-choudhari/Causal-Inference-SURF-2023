@@ -197,6 +197,8 @@ def calculate_error_matrix(experiment_data, proxy_arr, truth_arr, proxy_var, col
           confounds=confounds, confound_assn=confound_assn,
           alpha=alpha, n_func=n_func, return_triple=return_triple)
 
+  # print("{:.1f}% zero error estimates".format(
+  #     100 * np.mean(np.array(list(errs.values())) == 0)))
 
   to_return = Distribution(data=errs, columns=columns, normalized=False)
   experiment_data.set_err_matrix(to_return)
@@ -331,9 +333,9 @@ def get_regression_corrected_dist(dist, proxy_var, model, influence_vars = None)
   for non_proxy_assn in itertools.product(*[range(2) for _ in range(full_dim - 1)]):
     non_proxy_assn = dict(zip(non_proxy_columns, non_proxy_assn))
 
-    assn0 = {**non_proxy_assn, **{proxy_var: 1}}
+    assn0 = {**non_proxy_assn, **{proxy_var: 0}}
     tuple_assn0 = tuple(assn0[col] for col in dist.columns)
-    assn1 = {**non_proxy_assn, **{proxy_var: 0}}
+    assn1 = {**non_proxy_assn, **{proxy_var: 1}}
     tuple_assn1 = tuple(assn1[col] for col in dist.columns)
     if influence_vars is not None:
       model_input1 = tuple(assn1[col] for col in influencers)
@@ -350,21 +352,21 @@ def get_regression_corrected_dist(dist, proxy_var, model, influence_vars = None)
       err0 = model.predict_proba(np.array(assn0[proxy_var]).reshape(-1, 1))[:, 1]
     # err0 = errs[get_assn(0, confound_assn, proxied_index)]
 
-    if err1 + err0 != 1.0:
+    if err1 + err0 == 1.0:
+      corrected[tuple_assn0] = dist.get(**assn0)
+      corrected[tuple_assn1] = dist.get(**assn1)
+    else:
+
       corrected1 = (1 - err1) * dist.get(**assn0) - err1 * dist.get(**assn1)
       corrected1 /= (1 - err1 - err0)
       corrected1 = np.clip(corrected1, 1e-5, None)
-      corrected[tuple_assn1] = corrected1
-    else:
-      corrected[tuple_assn1] = dist.get(**assn1)
 
-    if err1 + err0 != 1.0:
       corrected0 = - err0 * dist.get(**assn0) + (1 - err0) * dist.get(**assn1)
       corrected0 /= (1 - err1 - err0)
       corrected0 = np.clip(corrected0, 1e-5, None)
+
       corrected[tuple_assn0] = corrected0
-    else:
-      corrected[tuple_assn0] = dist.get(**assn1)
+      corrected[tuple_assn1] = corrected1
 
   # We may need to normalize if we had singularities and had to keep original dist 
   total_weight = np.sum(list(corrected.values()))
@@ -380,9 +382,10 @@ def get_regression_corrected_dist(dist, proxy_var, model, influence_vars = None)
 
   corrected = Distribution(data=corrected, columns=dist.columns,
                            normalized=True)
+
   return corrected
 
-def get_perfect_corrected_dist(experiment_data, dist, proxy_var, influence_vars = None):
+def get_perfect_corrected_dist(experiment_data, dist, proxy_var, influence_vars=None, debug_model=None):
   '''
   Given a proxy distribution dist, error estimates, and a held-out truth,
     calculate the new dist that comes from using the error estimates to correct the proxy.
@@ -412,9 +415,9 @@ def get_perfect_corrected_dist(experiment_data, dist, proxy_var, influence_vars 
   for non_proxy_assn in itertools.product(*[range(2) for _ in range(full_dim - 1)]):
     non_proxy_assn = dict(zip(non_proxy_columns, non_proxy_assn))
 
-    assn0 = {**non_proxy_assn, **{proxy_var: 1}}
+    assn0 = {**non_proxy_assn, **{proxy_var: 0}}
     tuple_assn0 = tuple(assn0[col] for col in dist.columns)
-    assn1 = {**non_proxy_assn, **{proxy_var: 0}}
+    assn1 = {**non_proxy_assn, **{proxy_var: 1}}
     tuple_assn1 = tuple(assn1[col] for col in dist.columns)
     if influence_vars is not None:
       model_input1 = tuple(assn1[col] for col in influencers)
@@ -422,21 +425,30 @@ def get_perfect_corrected_dist(experiment_data, dist, proxy_var, influence_vars 
       err1 = experiment_data.true_err[model_input1]
       err0 = experiment_data.true_err[model_input0]
 
-    if err1 + err0 != 1.0:
+      if debug_model is not None:
+        model_err1 = debug_model.predict_proba(np.array(model_input1).reshape(1, -1))[:, 1]
+        err1err = (model_err1 - err1).tolist()[0]
+        model_err0 = debug_model.predict_proba(np.array(model_input0).reshape(1, -1))[:, 1]
+        err0err = (model_err0 - err0).tolist()[0]
+        print(f"err0err: {err0err:.3f}, err1err: {err1err:.3f}", end="; ")
+
+    if err1 + err0 == 1.0:
+      corrected[tuple_assn0] = dist.get(**assn0)
+      corrected[tuple_assn1] = dist.get(**assn1)
+    else:
       corrected1 = (1 - err1) * dist.get(**assn0) - err1 * dist.get(**assn1)
       corrected1 /= (1 - err1 - err0)
-      corrected1 = max(corrected1, 1e-5)
-      corrected[tuple_assn0] = corrected1
-    else:
-      corrected[tuple_assn0] = dist.get(**assn0)
+      corrected1 = np.clip(corrected1, 1e-5, None)
 
-    if err1 + err0 != 1.0:
       corrected0 = - err0 * dist.get(**assn0) + (1 - err0) * dist.get(**assn1)
       corrected0 /= (1 - err1 - err0)
-      corrected0 = max(corrected0, 1e-5)
-      corrected[tuple_assn1] = corrected0
-    else:
-      corrected[tuple_assn1] = dist.get(**assn1)
+      corrected0 = np.clip(corrected0, 1e-5, None)
+
+      corrected[tuple_assn0] = corrected0
+      corrected[tuple_assn1] = corrected1
+
+  if debug_model is not None:
+      print()
 
   # We may need to normalize if we had singularities and had to keep original dist 
   total_weight = np.sum(list(corrected.values()))
@@ -458,7 +470,8 @@ def correct_with_model(experiment_data, dist, proxy_var, proxy_arr, truth_arr, i
 
   model = train_error_model(experiment_data, proxy_arr, truth_arr, proxy_var, dist.columns, influence_vars)
   return get_regression_corrected_dist(dist, proxy_var, model, influence_vars = influence_vars)
-  # return get_perfect_corrected_dist(experiment_data, dist, proxy_var, influence_vars = influence_vars)
+
+  # return get_perfect_corrected_dist(experiment_data, dist, proxy_var, influence_vars=influence_vars, debug_model=None)
 
 def calculate_model_error_rate(experiment_data, error_truth, error_proxy, full_dim, influence_vars, proxy_i, proxy_var, columns):
   errs = {}
@@ -501,28 +514,24 @@ def impute_and_correct_with_model(experiment_data, train, test, error, columns, 
   num_train = int(train_percent * train.shape[0])
   num_dev = train.shape[0] - num_train
 
-  model = sklearn.linear_model.LogisticRegression(solver='lbfgs')
+  # model = sklearn.linear_model.LogisticRegression(solver='lbfgs')
   # model.fit(train_features[:num_train, :], train[:num_train, proxy_i])
-  model.fit(train[:num_train, feature_rows], train[:num_train, proxy_i])
+  # model.fit(train[:num_train, feature_rows], train[:num_train, proxy_i])
 
   # print(accuracy_score(model.predict(train[:num_train, feature_rows]), train[:num_train, proxy_i]))
 
 
   # true_dev = train_features[num_train:, :]
   # dev_preds = model.predict_proba(true_dev)
-  dev_preds = model.predict(train[num_train:, feature_rows])
+  # dev_preds = model.predict(train[num_train:, feature_rows])
   dev_truth = train[num_train:, :full_dim]
   true_dev_proxy = train[num_train:, :full_dim].copy().astype(np.float64)
   true_dev_proxy_dist = get_dist(true_dev_proxy, columns, proxy_var)
 
+  dev_proxy_dist, true_errs = construct_model_proxy_dist(true_dev_proxy_dist, .5, proxy_var, .1, nondiff=True)
+
   experiment_data.set_p_dot(true_dev_proxy_dist.dict)
-
-  # true_dev_proxy[:, proxy_i] = dev_preds
-
-  dev_proxy_dist, true_errs = construct_model_proxy_dist(true_dev_proxy_dist, .4, proxy_var, .005, nondiff = True)
-
   new_data_array = np.copy(true_dev_proxy) 
-
 
   for i in range(true_dev_proxy.shape[0]):
     combination = tuple(true_dev_proxy[i])
@@ -531,15 +540,15 @@ def impute_and_correct_with_model(experiment_data, train, test, error, columns, 
       new_data_array[i, proxy_i] = 1 - true_dev_proxy[i, proxy_i]
 
   true_dev_proxy = new_data_array
-
   train_accuracy = accuracy_score(true_dev_proxy[:, proxy_i], train[num_train:, proxy_i])
+
   # print("Train set classifier accuracy: {:.3f}".format(train_accuracy))
   # import pdb; pdb.set_trace()
 
   # test_features = np.concatenate((test[:, :proxy_i], test[:, 1 + proxy_i:]),
   #                                axis=1)
   # test_preds = model.predict_proba(test_features)
-  test_preds = model.predict(test[:, feature_rows])
+  # test_preds = model.predict(test[:, feature_rows])
   test_proxy = test[:, :full_dim].copy().astype(np.float64)
   # test_proxy[:, proxy_i] = test_preds
 
@@ -569,10 +578,11 @@ def impute_and_correct_with_model(experiment_data, train, test, error, columns, 
   # print("Large sample classifier accuracy: {:.3f}".format(accuracy))
   # calculate_model_error_rate(experiment_data, error_truth, error_proxy, full_dim, influence_vars, proxy_i, proxy_var, columns)
 
+  correct_distribution = correct_with_model(
+      experiment_data, true_test_proxy_dist, proxy_var,
+      true_dev_proxy[:, :full_dim], dev_truth,
+      influence_vars=influence_vars)
 
-
-
-  correct_distribution = correct_with_model(experiment_data, true_test_proxy_dist, proxy_var, true_dev_proxy[:, :full_dim], dev_truth, influence_vars = influence_vars)
   return [correct_distribution], true_dev_proxy_dist, accuracy
 
 
@@ -659,11 +669,8 @@ def fractional_impute_and_correct(experiment_data, train, test, error, columns, 
   num_dev = train.shape[0] - num_train
 
   model = sklearn.linear_model.LogisticRegression(solver='lbfgs')
-  # model.fit(train_features[:num_train, :], train[:num_train, proxy_i])
   model.fit(train[:num_train, feature_rows], train[:num_train, proxy_i])
 
-  # true_dev = train_features[num_train:, :]
-  # dev_preds = model.predict_proba(true_dev)
   dev_preds = model.predict(train[num_train:, feature_rows])
   dev_truth = train[num_train:, :full_dim]
   true_dev_proxy = train[num_train:, :full_dim].copy().astype(np.float64)
@@ -671,10 +678,7 @@ def fractional_impute_and_correct(experiment_data, train, test, error, columns, 
   true_dev_proxy_dist = get_dist(true_dev_proxy, columns, proxy_var)
   experiment_data.set_p_dot(true_dev_proxy_dist.dict)
 
-  # true_dev_proxy[:, proxy_i] = dev_preds
-
-
-  dev_proxy_dist, true_errs = construct_model_proxy_dist(true_dev_proxy_dist, .4, proxy_var, .005, nondiff = True)
+  dev_proxy_dist, true_errs = construct_model_proxy_dist(true_dev_proxy_dist, .5, proxy_var, .1, nondiff=True)
 
   new_data_array = np.copy(true_dev_proxy)  
 
@@ -683,7 +687,6 @@ def fractional_impute_and_correct(experiment_data, train, test, error, columns, 
     error_prob = true_errs.get(combination, 0.0) 
     if np.random.random() < error_prob:
       new_data_array[i, proxy_i] = 1 - true_dev_proxy[i, proxy_i]
-
 
   true_dev_proxy = new_data_array
   train_accuracy = accuracy_score(true_dev_proxy[:, proxy_i], train[num_train:, proxy_i])
@@ -710,7 +713,7 @@ def fractional_impute_and_correct(experiment_data, train, test, error, columns, 
 
   accuracy = accuracy_score(test_proxy[:, proxy_i], test[:, proxy_i])
   # print("test set classifier accuracy: {:.3f}".format(accuracy))
-  true_dist = get_fractional_dist(train[num_train:, :full_dim].copy().astype(np.float64), columns, proxy_var)
+  # true_dist = get_fractional_dist(train[num_train:, :full_dim].copy().astype(np.float64), columns, proxy_var)
 
   # error_preds = model.predict(error[:, feature_rows])
   # error_truth = error[:, :full_dim].copy().astype(np.float64)
@@ -1169,10 +1172,15 @@ def main(method = None, influencers = None, cdim = None):
           mean_abs.get('mean', np.nan), stds.get('mean', np.nan),
       ))
   else:
-      print("min/p5/mean/p95/max: {:.5f} {:.5f} {:.5f} {:.5f} {:.5f}".format(
+      # print("min/p5/mean/p95/max: {:.5f} {:.5f} {:.5f} {:.5f} {:.5f}".format(
+      #     means.get('min', np.nan),
+      #     means.get('p5.0', np.nan), means.get('mean', np.nan),
+      #     means.get('p95.0', np.nan), means.get('max', np.nan)))
+      print("min/mean/meanabs/max: {:.5f} {:.5f} {:.5f} {:.5f}".format(
           means.get('min', np.nan),
-          means.get('p5.0', np.nan), means.get('mean', np.nan),
-          means.get('p95.0', np.nan), means.get('max', np.nan)))
+          means.get('mean', np.nan),
+          mean_abs.get('mean', np.nan),
+          means.get('max', np.nan)))
 
   outfn = os.path.join(args.outdir, get_outfn(args))
 
@@ -1194,7 +1202,7 @@ def main(method = None, influencers = None, cdim = None):
 
   # NOTE: if k>1, there's a mean being computed before we aggregate
   #   so if we want actual absolute error, should use mean_abs.get()
-  return [means.get('mean', np.nan_to_num), stds.get('mean', np.nan), mean_rate, experiment_data]
+  return [mean_abs.get('mean', np.nan_to_num), stds.get('mean', np.nan), mean_rate, experiment_data]
 
 def print_results(model_experiment, matrix_experiment, list_keys):
   matrix_diff = []
@@ -1232,18 +1240,21 @@ if __name__ == "__main__":
   model_std = []
   classifier_rates = []
 
-  for i in range(2, 3):
+  for c_dim in range(6, 11, 2):
+    influencer = "a,y,"
+    influencer += ",".join([f"c{i}" for i in range(c_dim)])
+
     print("matrix", end=" ")
-    matrix_list = main(influencers = influencer, cdim = i)
+    matrix_list = main(influencers = influencer, cdim = c_dim)
     print("model", end=" ")
-    model_list = main(method = "new", influencers = influencer, cdim = i)
+    model_list = main(method = "new", influencers = influencer, cdim = c_dim)
     error_matrix_data.append(abs(matrix_list[0]))
     error_matrix_std.append(matrix_list[1])
     model_data.append(abs(model_list[0]))
     model_std.append(model_list[1])
     classifier_rates.append(model_list[2])
-    influencer += ",c" + str(i)
-    influence_size.append(2 + i)
+
+    influence_size.append(2 + c_dim)
     model_experiment = model_list[3]
     matrix_experiment = matrix_list[3]
 
@@ -1252,7 +1263,6 @@ if __name__ == "__main__":
 
     matrix_true_errs = np.array(matrix_true_errs).flatten()
     matrix_pred_errs = np.array(matrix_pred_errs).flatten()
-
 
     model_true_errs = [model_experiment.true_err[key] for key in matrix_experiment.err_matrix.dict]
     model_pred_errs = []
@@ -1292,8 +1302,8 @@ if __name__ == "__main__":
   plt.plot(influence_size, error_matrix_data, color = 'red', label = 'Error matrix data')
   plt.plot(influence_size, model_data, color = 'blue', label = 'Model data')
 
-  plt.plot(influence_size, np.clip([a - b for a,b in zip(error_matrix_data, error_matrix_std)], 0, None), linestyle = '--', color = 'red')
-  plt.plot(influence_size, np.clip([a - b for a,b in zip(model_data, model_std)], 0, None), linestyle = '--', color = 'blue')
+  # plt.plot(influence_size, np.clip([a - b for a,b in zip(error_matrix_data, error_matrix_std)], 0, None), linestyle = '--', color = 'red')
+  # plt.plot(influence_size, np.clip([a - b for a,b in zip(model_data, model_std)], 0, None), linestyle = '--', color = 'blue')
 
   plt.plot(influence_size, [a + b for a,b in zip(error_matrix_data, error_matrix_std)], linestyle = '--', color = 'red')
   plt.plot(influence_size, [a + b for a,b in zip(model_data, model_std)], linestyle = '--', color = 'blue')
