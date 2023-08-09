@@ -26,6 +26,7 @@ from sensitivity import clopper_pearson_interval
 from line_profiler import LineProfiler
 
 import matplotlib.pyplot as plt
+import seaborn as sns
 
 import warnings
 # warnings.simplefilter("error")
@@ -63,12 +64,13 @@ def plotter(x_data, y_data, y_std, method_type, model_type):
 
 def create_plot_data(cdim, logn, method_type, k, lower_cdim = None, upper_cdim = None, cdim_step = None,
              lower_logn = None, upper_logn = None, logn_step = None, model_type = None):
+    
     if cdim_step is None:
         assert(logn_step is not None)
         causal_error = []
         causal_std = []
         logn = []
-        for i in range(lower_logn, upper_logn + 1, logn_step):
+        for i in np.arange(lower_logn, upper_logn + 1, logn_step):
            logn.append(i)
            json_dir = 'experiments/' + get_result_dir(cdim, float(i), method_type, k, model_type)
            if not os.path.exists(json_dir):
@@ -90,20 +92,81 @@ def create_plot_data(cdim, logn, method_type, k, lower_cdim = None, upper_cdim =
         causal_error = []
         causal_std = []
         cdim = []
-        for i in range(lower_cdim, upper_cdim + 1, cdim_step):
+        for i in np.arange(lower_cdim, upper_cdim + 1, cdim_step):
            cdim.append(i)
-           json_dir = 'experiments/' + get_result_dir(i, float(logn), method_type, k, model_type)
+           json_dir = 'experiments/' + get_result_dir(int(i), float(logn), method_type, k, model_type)
            if not os.path.exists(json_dir):
               if model_type is not None:
-                os.system("python measurement_error.py --logn_examples {} --c_dim {}  --method_type {} --model_type {} --k {}".format(logn, i, method_type, model_type, k))
+                os.system("python measurement_error.py --logn_examples {} --c_dim {}  --method_type {} --model_type {} --k {}".format(logn, int(i), method_type, model_type, k))
               else:
-                os.system("python measurement_error.py --logn_examples {} --c_dim {}  --method_type {} --k {}".format(logn, i, method_type, k))     
+                os.system("python measurement_error.py --logn_examples {} --c_dim {}  --method_type {} --k {}".format(logn, int(i), method_type, k))     
            
            mean_error, std = read_json(json_dir)
            causal_error.append(mean_error)
            causal_std.append(abs(std))
 
         return causal_error, causal_std, cdim
+    
+    elif logn_step is not None and cdim_step is not None:
+       assert(lower_cdim is not None and lower_logn is not None)
+       rows = (upper_cdim - lower_cdim) / cdim_step + 1
+       cols = (upper_logn - lower_logn) / logn_step + 1
+       data_array = np.empty((int(rows), int(cols)))
+
+
+       curr_row = 0
+       curr_col = 0
+
+       row_list = []
+       col_list = []
+
+       for i in np.arange(lower_cdim, upper_cdim + .1, cdim_step):
+          row_list.append(i)
+          for n in np.arange(lower_logn, upper_logn + .1, logn_step):
+             if i == lower_cdim:
+                col_list.append(n)
+             json_dir = 'experiments/' + get_result_dir(int(i), n, method_type, k, model_type)
+             if not os.path.exists(json_dir):
+                if model_type is not None:
+                  os.system("python measurement_error.py --logn_examples {} --c_dim {}  --method_type {} --model_type {} --k {}".format(n, int(i), method_type, model_type, k))
+                else:
+                  os.system("python measurement_error.py --logn_examples {} --c_dim {}  --method_type {} --k {}".format(n, int(i), method_type, k))
+
+             mean_error, std = read_json(json_dir)
+             data_array[curr_row, curr_col] = mean_error
+             curr_col += 1
+          curr_row += 1
+          curr_col = 0
+
+       return data_array, row_list, col_list
+    
+def create_heatmap(array, rows, cols, axis):
+    sns.set()
+    heatmap = sns.heatmap(array, annot=True, cmap="YlGnBu", ax = axis)
+
+    heatmap.set_xticklabels(cols)
+    heatmap.set_yticklabels(rows)
+
+    axis.set_xlabel("Log_n examples")
+    axis.set_ylabel("C_dim")
+    axis.set_title("Heatmap of overall causal estimate error")
+
+def create_special_heatmap(original_array, test_array, rows, cols, axis):
+   sns.set()
+   #plot_array = (original_array > test_array).astype(int)
+   plot_array = original_array - test_array
+   heatmap = sns.heatmap(plot_array, annot = True, cmap = "YlGnBu", vmin = -.2, vmax = .2, ax = axis)
+
+   heatmap.set_xticklabels(cols)
+   heatmap.set_yticklabels(rows)
+
+   axis.set_xlabel("Log_n examples")
+   axis.set_ylabel("C_dim")
+   axis.set_title("Heatmap of overall causal estimate error")
+             
+
+             
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -120,35 +183,57 @@ def main():
         
     parser.add_argument("--upper_cdim", type=int, default=None)
     parser.add_argument("--lower_cdim", type=int, default=None)
-    parser.add_argument("--cdim_step", type=int, default=None)
+    parser.add_argument("--cdim_step", type=float, default=None)
 
-    parser.add_argument("--upper_logn", type=int, default=None)
-    parser.add_argument("--lower_logn", type=int, default=None)
-    parser.add_argument("--logn_step", type=int, default=None) 
+    parser.add_argument("--upper_logn", type=float, default=None)
+    parser.add_argument("--lower_logn", type=float, default=None)
+    parser.add_argument("--logn_step", type=float, default=None) 
 
     args = parser.parse_args()
 
-    if args.matrix:
-        y_data, y_std, x_data = create_plot_data(args.cdim, args.logn, 'matrix', args.k, args.lower_cdim,
-                                                args.upper_cdim, args.cdim_step, args.lower_logn,
-                                                args.upper_logn, args.logn_step, None)
-        
-        plotter(x_data, y_data, y_std, 'matrix', None)
+    if args.cdim_step is not None and args.logn_step is not None:
+       array_1, rows, cols = create_plot_data(args.cdim, args.logn, 'matrix', args.k, args.lower_cdim,
+                                                  args.upper_cdim, args.cdim_step, args.lower_logn,
+                                                  args.upper_logn, args.logn_step, None)
+       array_2, row1, col1 = create_plot_data(args.cdim, args.logn, 'model', args.k, args.lower_cdim,
+                                                  args.upper_cdim, args.cdim_step, args.lower_logn,
+                                                  args.upper_logn, args.logn_step, 'regression')
+      #  array_3 = create_plot_data(args.cdim, args.logn, 'model', args.k, args.lower_cdim,
+      #                                             args.upper_cdim, args.cdim_step, args.lower_logn,
+      #                                             args.upper_logn, args.logn_step, 'perfect')
+       
+       fig1, ax1 = plt.subplots()
+       fig2, ax2 = plt.subplots()
+       fig3, ax3 = plt.subplots()
+       create_heatmap(array_1, rows, cols, ax2)
+       create_heatmap(array_2, rows, cols, ax1)
 
-    if args.model:
-       model_list = [args.regression, args.perfect]
-       if model_list[0]:
-        y_data, y_std, x_data = create_plot_data(args.cdim, args.logn, 'model', args.k, args.lower_cdim,
-                                                args.upper_cdim, args.cdim_step, args.lower_logn,
-                                                args.upper_logn, args.logn_step, 'regression')
-        
-        plotter(x_data, y_data, y_std, 'model', 'regression')
-       if model_list[1]:
-        y_data, y_std, x_data = create_plot_data(args.cdim, args.logn, 'model', args.k, args.lower_cdim,
-                                                args.upper_cdim, args.cdim_step, args.lower_logn,
-                                                args.upper_logn, args.logn_step, 'perfect')
-        
-        plotter(x_data, y_data, y_std, 'model', 'perfect')
+       create_special_heatmap(array_1, array_2, rows, cols, ax3)
+
+       plt.show()
+
+    else:
+      if args.matrix:
+          y_data, y_std, x_data = create_plot_data(args.cdim, args.logn, 'matrix', args.k, args.lower_cdim,
+                                                  args.upper_cdim, args.cdim_step, args.lower_logn,
+                                                  args.upper_logn, args.logn_step, None)
+          
+          plotter(x_data, y_data, y_std, 'matrix', None)
+
+      if args.model:
+        model_list = [args.regression, args.perfect]
+        if model_list[0]:
+          y_data, y_std, x_data = create_plot_data(args.cdim, args.logn, 'model', args.k, args.lower_cdim,
+                                                  args.upper_cdim, args.cdim_step, args.lower_logn,
+                                                  args.upper_logn, args.logn_step, 'regression')
+          
+          plotter(x_data, y_data, y_std, 'model', 'regression')
+        if model_list[1]:
+          y_data, y_std, x_data = create_plot_data(args.cdim, args.logn, 'model', args.k, args.lower_cdim,
+                                                  args.upper_cdim, args.cdim_step, args.lower_logn,
+                                                  args.upper_logn, args.logn_step, 'perfect')
+          
+          plotter(x_data, y_data, y_std, 'model', 'perfect')
 
     plt.legend()
 
