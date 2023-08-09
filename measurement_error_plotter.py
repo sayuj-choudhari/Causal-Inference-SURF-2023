@@ -140,29 +140,38 @@ def create_plot_data(cdim, logn, method_type, k, lower_cdim = None, upper_cdim =
 
        return data_array, row_list, col_list
     
-def create_heatmap(array, rows, cols, axis):
+def create_heatmap(array, rows, cols, num, title):
+    plt.figure()
     sns.set()
-    heatmap = sns.heatmap(array, annot=True, cmap="YlGnBu", ax = axis)
+    heatmap = sns.heatmap(array, annot=True, cmap="RdBu_r")
 
     heatmap.set_xticklabels(cols)
     heatmap.set_yticklabels(rows)
 
-    axis.set_xlabel("Log_n examples")
-    axis.set_ylabel("C_dim")
-    axis.set_title("Heatmap of overall causal estimate error")
+    plt.xlabel("Log_n examples")
+    plt.ylabel("C_dim")
+    plt.title("Heatmap of overall causal estimate error: {}".format(title))
 
-def create_special_heatmap(original_array, test_array, rows, cols, axis):
+    path = "experiment_figures/experiment_" + str(num) + ".png"
+    plt.savefig(path)
+    plt.close()
+
+def create_special_heatmap(original_array, test_array, rows, cols, num, title):
+   plt.figure()
    sns.set()
-   #plot_array = (original_array > test_array).astype(int)
    plot_array = original_array - test_array
-   heatmap = sns.heatmap(plot_array, annot = True, cmap = "YlGnBu", vmin = -.2, vmax = .2, ax = axis)
+   heatmap = sns.heatmap(plot_array, annot = True, cmap = "RdBu_r", vmin = -.2, vmax = .2)
 
    heatmap.set_xticklabels(cols)
    heatmap.set_yticklabels(rows)
 
-   axis.set_xlabel("Log_n examples")
-   axis.set_ylabel("C_dim")
-   axis.set_title("Heatmap of overall causal estimate error")
+   plt.xlabel("Log_n examples")
+   plt.ylabel("C_dim")
+   plt.title("Heatmap of overall causal estimate error: {}".format(title))
+
+   path = "experiment_figures/experiment_" + str(num) + ".png"
+   plt.savefig(path)
+   plt.close()
              
 
              
@@ -205,12 +214,10 @@ def main():
        fig1, ax1 = plt.subplots()
        fig2, ax2 = plt.subplots()
        fig3, ax3 = plt.subplots()
-       create_heatmap(array_1, rows, cols, ax2)
-       create_heatmap(array_2, rows, cols, ax1)
+       create_heatmap(array_1, rows, cols, 1, 'matrix')
+       create_heatmap(array_2, rows, cols, 2, 'model')
 
-       create_special_heatmap(array_1, array_2, rows, cols, ax3)
-
-       plt.show()
+       create_special_heatmap(array_1, array_2, rows, cols, 3, 'matrix vs model')
 
     else:
       if args.matrix:
